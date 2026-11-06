@@ -15,6 +15,7 @@
   <oxygen-challenge
     sitekey="oc_public_demo"
     action="submit"
+    risk="medium"
     name="oxygen-token"
   ></oxygen-challenge>
 
@@ -36,6 +37,8 @@
 | `action` | 否 | `submit` | 业务动作 |
 | `name` | 否 | `oxygen-token` | 隐藏字段名 |
 | `challenge-type` | 否 | 随机 | 固定题型，见 API 文档 |
+| `risk` | 否 | `low` | `low/medium/high/critical`，对应 3/4/6/8 步 |
+| `steps` | 否 | 风险默认 | 自定义 1 到 8 步，主要用于验收 |
 | `accessible` | 否 | `false` | 设为 `true` 强制反色无障碍模式 |
 
 管理员和自动化验收可以固定题型：
@@ -56,6 +59,11 @@
 - `audio_sequence`
 - `calculation`
 - `key_pointer`
+- `pattern_memory`
+- `count_flash`
+- `market_trade`
+
+显式 `challenge-type` 会固定为单题会话。风险会话在 iframe 内逐步推进，进度显示在卡片底部。
 
 ## 事件
 
@@ -68,6 +76,10 @@ challenge.addEventListener("oxygenchallenge:verified", (event) => {
 
 challenge.addEventListener("oxygenchallenge:failed", (event) => {
   console.log(event.detail.code);
+});
+
+challenge.addEventListener("oxygenchallenge:step", (event) => {
+  console.log(event.detail.step, event.detail.totalSteps);
 });
 ```
 
@@ -104,7 +116,10 @@ document.querySelector("oxygen-challenge").reset();
 | `action` | 业务动作 |
 | `parentOrigin` | 可选，必须在站点 origin 白名单内 |
 | `challengeType` | 可选，固定题型 |
+| `risk` | 可选，`low/medium/high/critical` |
+| `steps` | 可选，1 到 8 |
 | `accessible` | `0` 或 `1` |
+| `session` | 服务器生成的会话续页，不应由客户页面自行构造 |
 
 ## CSP
 
@@ -123,7 +138,11 @@ frame-src https://captcha.oxygenai.top
 - 所有交互控件触控目标不小于 44px。
 - 图标、刷新和无障碍按钮都有可访问名称与键盘焦点态。
 - `accessible="true"` 不显示网格或动态题，强制使用反色题和 DTMF 音频。
+- 风险会话只有在最后一步通过后才写入隐藏 token 字段。
 - 声音题只在用户点击“播放声音”后请求和播放 WAV。
+- 序列记忆只播放一次随机顺序；用户需要主动点击“播放序列”。
+- 瞬时计数不展示 DOM 数量，圆点只显示约 1 秒。
+- 市场题使用低点买入、高点卖出的曲线点击交互。
 - 动态题和双输入题尊重 `prefers-reduced-motion`；系统要求减少动态效果时仍可通过
   `accessible` 切换到静态替代。
 

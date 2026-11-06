@@ -5,8 +5,20 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
+import { RISK_STEPS } from "../src/challenge.js";
+import {
+  countFromSeed,
+  extremeIndices,
+  patternSequence,
+} from "../src/microgames.js";
 import { motionTarget } from "../src/motion.js";
-import type { AppConfig, ChallengeType } from "../src/types.js";
+import type {
+  AppConfig,
+  ChallengeEvidence,
+  ChallengeState,
+  ChallengeType,
+  RiskLevel,
+} from "../src/types.js";
 
 const testConfig: AppConfig = {
   nodeEnv: "test",
@@ -72,7 +84,89 @@ describe("OxygenChallenge API", () => {
       expression?: string;
       requiredDistance?: number;
       requiredHoldMs?: number;
+      sessionId?: string;
+      step?: number;
+      totalSteps?: number;
+      risk?: RiskLevel;
+      pattern?: { seed: number; sequenceLength: number };
+      countFlash?: { seed: number; revealMs: number };
+      market?: { seed: number; width: number; height: number };
     }>();
+  }
+
+  async function createSession(risk: RiskLevel) {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/challenges",
+      headers: { origin: "https://app.test" },
+      payload: { siteKey: "site_test", action: "submit", risk },
+    });
+    expect(response.statusCode).toBe(200);
+    return response.json<{
+      challengeId: string;
+      sessionId: string;
+      step: number;
+      totalSteps: number;
+      risk: RiskLevel;
+      type: ChallengeType;
+    }>();
+  }
+
+  function evidenceFor(state: ChallengeState): ChallengeEvidence {
+    if (state.type === "inverse_occlusion") {
+      if (!state.visibleCode) {
+        throw new Error("inverse state missing");
+      }
+      return { answer: state.visibleCode };
+    }
+    if (state.type === "grid_select") {
+      if (!state.grid) {
+        throw new Error("grid state missing");
+      }
+      return { selectedIndices: state.grid.targetIndices };
+    }
+    if (state.type === "motion_drag" && state.motion) {
+      return { point: { ...motionTarget(state.motion, 1_200), elapsedMs: 1_200 } };
+    }
+    if (state.type === "audio_sequence") {
+      if (!state.audioSequence) {
+        throw new Error("audio state missing");
+      }
+      return { answer: state.audioSequence.answerKey };
+    }
+    if (state.type === "calculation") {
+      if (!state.calculation) {
+        throw new Error("calculation state missing");
+      }
+      return { answer: state.calculation.answer };
+    }
+    if (state.type === "key_pointer" && state.keyPointer) {
+      return {
+        holdMs: state.keyPointer.requiredHoldMs,
+        distance: state.keyPointer.requiredDistance,
+      };
+    }
+    if (state.type === "pattern_memory" && state.patternMemory) {
+      return {
+        selectedIndices: patternSequence(
+          state.patternMemory.seed,
+          state.patternMemory.sequenceLength,
+        ),
+      };
+    }
+    if (state.type === "count_flash" && state.countFlash) {
+      return { answer: String(countFromSeed(state.countFlash.seed)) };
+    }
+    if (state.type === "market_trade" && state.marketTrade) {
+      const extremes = extremeIndices(state.marketTrade.prices);
+      return {
+        market: {
+          buyIndex: state.marketTrade.buyIndex ?? extremes.low,
+          sellIndex: state.marketTrade.sellIndex ?? extremes.high,
+        },
+      };
+    }
+    throw new Error(`No evidence helper for ${state.type}`);
   }
 
   it("creates an inverse-occlusion challenge with hidden decoy and path-only overlay", async () => {
@@ -165,6 +259,7 @@ describe("OxygenChallenge API", () => {
   it("forces the inverse-occlusion fallback when accessible mode is requested", async () => {
     const body = await create("grid_select", "site_test", "submit", true);
     expect(body.type).toBe("inverse_occlusion");
+    expect(body.totalSteps).toBe(1);
   });
 
   it("serves a nine-tile grid without leaking target indices", async () => {
@@ -306,6 +401,134 @@ describe("OxygenChallenge API", () => {
     });
     expect(correct.statusCode).toBe(200);
     expect(correct.json()).toMatchObject({ verified: true, siteKey: "site_test" });
+  });
+
+  it("validates a pattern-memory sequence without serializing it", async () => {
+    const body = await create("pattern_memory");
+    const state = challenges.getForAsset(body.challengeId);
+    expect(body.type).toBe("pattern_memory");
+    expect(body.pattern?.sequenceLength).toBeGreaterThanOrEqual(3);
+    expect(body).not.toHaveProperty("sequence");
+    if (!state?.patternMemory) {
+      throw new Error("pattern state missing");
+    }
+    const sequence = patternSequence(
+      state.patternMemory.seed,
+      state.patternMemory.sequenceLength,
+    );
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/challenges/${body.challengeId}/verify`,
+      payload: { selectedIndices: sequence },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ verified: true, siteKey: "site_test" });
+  });
+
+  it("validates a transient count without exposing the count in JSON", async () => {
+    const body = await create("count_flash");
+    const state = challenges.getForAsset(body.challengeId);
+    expect(body.type).toBe("count_flash");
+    expect(body.countFlash?.revealMs).toBeGreaterThanOrEqual(800);
+    expect(body).not.toHaveProperty("count");
+    if (!state?.countFlash) {
+      throw new Error("count state missing");
+    }
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/challenges/${body.challengeId}/verify`,
+      payload: { answer: String(state.countFlash.count) },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ verified: true, siteKey: "site_test" });
+  });
+
+  it("validates a buy-low sell-high market interaction", async () => {
+    const body = await create("market_trade");
+    const state = challenges.getForAsset(body.challengeId);
+    expect(body.type).toBe("market_trade");
+    expect(body.market?.width).toBe(360);
+    expect(body).not.toHaveProperty("buyIndex");
+    if (!state?.marketTrade) {
+      throw new Error("market state missing");
+    }
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/challenges/${body.challengeId}/verify`,
+      payload: {
+        market: {
+          buyIndex: state.marketTrade.buyIndex,
+          sellIndex: state.marketTrade.sellIndex,
+        },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ verified: true, siteKey: "site_test" });
+  });
+
+  it("issues a token only after all medium-risk session steps pass", async () => {
+    const first = await createSession("medium");
+    expect(first.totalSteps).toBe(4);
+    expect(first.step).toBe(1);
+    expect(first.risk).toBe("medium");
+
+    let challengeId = first.challengeId;
+    for (let step = 1; step <= 4; step += 1) {
+      const state = challenges.getForAsset(challengeId);
+      expect(state).toBeDefined();
+      if (!state) {
+        throw new Error("session challenge state missing");
+      }
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/challenges/${challengeId}/verify`,
+        payload: evidenceFor(state),
+      });
+      expect(response.statusCode).toBe(200);
+      const result = response.json<{
+        verified: boolean;
+        token?: string;
+        stepPassed?: boolean;
+        nextChallenge?: { challengeId: string };
+        stepsCompleted?: number;
+      }>();
+      if (step < 4) {
+        expect(result.verified).toBe(false);
+        expect(result.stepPassed).toBe(true);
+        expect(result).not.toHaveProperty("token");
+        expect(result.nextChallenge?.challengeId).toBeTruthy();
+        challengeId = result.nextChallenge?.challengeId ?? "";
+      } else {
+        expect(result.verified).toBe(true);
+        expect(result.stepsCompleted).toBe(4);
+        expect(result.token).toContain(".");
+      }
+    }
+  });
+
+  it("defaults multi-step sessions to three and keeps explicit types single-step", async () => {
+    const defaultSession = await app.inject({
+      method: "POST",
+      url: "/v1/challenges",
+      headers: { origin: "https://app.test" },
+      payload: { siteKey: "site_test", action: "submit" },
+    });
+    expect(defaultSession.statusCode).toBe(200);
+    expect(defaultSession.json()).toMatchObject({
+      risk: "low",
+      step: 1,
+      totalSteps: 3,
+    });
+
+    const explicit = await create("grid_select");
+    expect(explicit).toMatchObject({ risk: "low", step: 1, totalSteps: 1 });
+  });
+
+  it("maps high and critical risk to six and eight steps", async () => {
+    const high = await createSession("high");
+    const critical = await createSession("critical");
+    expect(high.totalSteps).toBe(RISK_STEPS.high);
+    expect(critical.totalSteps).toBe(RISK_STEPS.critical);
   });
 
   it("rejects missing and disallowed origins", async () => {

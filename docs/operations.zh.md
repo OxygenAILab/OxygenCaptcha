@@ -36,8 +36,9 @@ python -m py_compile tests/browser_smoke.py
 python tests/browser_smoke.py
 ```
 
-回归会覆盖六个题型、390px 移动端、动态指针轨迹、键盘双输入、诱饵命中、
-`accessible=1` 和跨域 Web Component。截图写入 `_devdocs/evidence/`，不提交到 Public 仓库。
+回归会覆盖九个题型、390px 移动端、动态指针轨迹、键盘双输入、序列记忆、瞬时计数、
+股市买卖、风险会话逐题推进、诱饵命中、`accessible=1` 和跨域 Web Component。
+截图写入 `_devdocs/evidence/`，不提交到 Public 仓库。
 
 ## systemd
 

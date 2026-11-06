@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.0-alpha.2
+  version: 26.0.0-alpha.3
   description: Risk-aware CAPTCHA API with visual, motion, audio, calculation and dual-input challenges.
   license:
     name: Apache-2.0
@@ -53,6 +53,7 @@ paths:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/VerificationReceipt"
+                  - $ref: "#/components/schemas/StepPassed"
                   - $ref: "#/components/schemas/VerificationFailure"
         "410":
           description: Challenge expired or consumed
@@ -170,7 +171,7 @@ paths:
       parameters:
         - in: query
           name: sitekey
-          required: true
+          required: false
           schema:
             type: string
         - in: query
@@ -190,6 +191,23 @@ paths:
           required: false
           schema:
             $ref: "#/components/schemas/ChallengeType"
+        - in: query
+          name: risk
+          required: false
+          schema:
+            $ref: "#/components/schemas/RiskLevel"
+        - in: query
+          name: steps
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 8
+        - in: query
+          name: session
+          required: false
+          schema:
+            type: string
         - in: query
           name: accessible
           required: false
@@ -238,6 +256,12 @@ components:
         - audio_sequence
         - calculation
         - key_pointer
+        - pattern_memory
+        - count_flash
+        - market_trade
+    RiskLevel:
+      type: string
+      enum: [low, medium, high, critical]
     CreateChallengeRequest:
       type: object
       required: [siteKey]
@@ -252,6 +276,12 @@ components:
           default: false
         challengeType:
           $ref: "#/components/schemas/ChallengeType"
+        risk:
+          $ref: "#/components/schemas/RiskLevel"
+        steps:
+          type: integer
+          minimum: 1
+          maximum: 8
     ChallengeResponse:
       type: object
       required: [challengeId, type, siteKey, action, expiresAt, prompt, maxAttempts]
@@ -264,6 +294,17 @@ components:
           type: string
         action:
           type: string
+        sessionId:
+          type: string
+        step:
+          type: integer
+          minimum: 1
+        totalSteps:
+          type: integer
+          minimum: 1
+          maximum: 8
+        risk:
+          $ref: "#/components/schemas/RiskLevel"
         expiresAt:
           type: string
           format: date-time
@@ -321,6 +362,29 @@ components:
           type: number
         requiredHoldMs:
           type: integer
+        pattern:
+          type: object
+          properties:
+            seed:
+              type: integer
+            sequenceLength:
+              type: integer
+        countFlash:
+          type: object
+          properties:
+            seed:
+              type: integer
+            revealMs:
+              type: integer
+        market:
+          type: object
+          properties:
+            seed:
+              type: integer
+            width:
+              type: number
+            height:
+              type: number
     ChallengeEvidence:
       type: object
       properties:
@@ -350,6 +414,16 @@ components:
         distance:
           type: number
           minimum: 0
+        market:
+          type: object
+          required: [buyIndex, sellIndex]
+          properties:
+            buyIndex:
+              type: integer
+              minimum: 0
+            sellIndex:
+              type: integer
+              minimum: 0
     VerificationReceipt:
       type: object
       required: [verified, token, assuranceLevel, action, siteKey, expiresAt]
@@ -366,9 +440,52 @@ components:
           type: string
         siteKey:
           type: string
+        sessionId:
+          type: string
+        risk:
+          $ref: "#/components/schemas/RiskLevel"
+        stepsCompleted:
+          type: integer
+          minimum: 1
+          maximum: 8
         expiresAt:
           type: string
           format: date-time
+    StepPassed:
+      type: object
+      required:
+        - verified
+        - stepPassed
+        - code
+        - sessionId
+        - step
+        - totalSteps
+        - nextChallenge
+        - nextEmbedUrl
+      properties:
+        verified:
+          type: boolean
+          const: false
+        stepPassed:
+          type: boolean
+          const: true
+        code:
+          type: string
+          const: STEP_PASSED
+        sessionId:
+          type: string
+        step:
+          type: integer
+        totalSteps:
+          type: integer
+        remainingSteps:
+          type: integer
+        nextChallenge:
+          type: object
+          additionalProperties: true
+        nextEmbedUrl:
+          type: string
+          format: uri
     VerificationFailure:
       type: object
       required: [verified, code]

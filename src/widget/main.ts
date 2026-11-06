@@ -64,6 +64,8 @@ class OxygenChallengeElement extends HTMLElement {
     const action = this.getAttribute("action") ?? "submit";
     const challengeType = this.getAttribute("challenge-type");
     const accessible = this.getAttribute("accessible");
+    const risk = this.getAttribute("risk");
+    const steps = this.getAttribute("steps");
     const url = new URL("/embed", this.sourceOrigin);
     url.searchParams.set("sitekey", siteKey);
     url.searchParams.set("action", action);
@@ -81,6 +83,12 @@ class OxygenChallengeElement extends HTMLElement {
     if (accessible === "true" || accessible === "1" || accessible === "") {
       url.searchParams.set("accessible", "1");
     }
+    if (risk === "low" || risk === "medium" || risk === "high" || risk === "critical") {
+      url.searchParams.set("risk", risk);
+    }
+    if (steps && /^[1-8]$/.test(steps)) {
+      url.searchParams.set("steps", steps);
+    }
     return url.toString();
   }
 
@@ -94,6 +102,8 @@ class OxygenChallengeElement extends HTMLElement {
       token?: string;
       code?: string;
       height?: number;
+      step?: number;
+      totalSteps?: number;
     };
     if (data.source !== WIDGET_SOURCE) {
       return;
@@ -104,6 +114,13 @@ class OxygenChallengeElement extends HTMLElement {
       if (this.frame) {
         this.frame.style.height = `${height}px`;
       }
+    } else if (data.type === "step") {
+      this.dispatchEvent(
+        new CustomEvent("oxygenchallenge:step", {
+          detail: { step: data.step, totalSteps: data.totalSteps },
+          bubbles: true,
+        }),
+      );
     } else if (data.type === "verified" && data.token) {
       this.attachHiddenToken(data.token);
       this.dispatchEvent(
