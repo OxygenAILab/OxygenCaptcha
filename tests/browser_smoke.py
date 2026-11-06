@@ -14,7 +14,11 @@ OUT = Path("_devdocs/evidence")
 OUT.mkdir(parents=True, exist_ok=True)
 
 
-def embed_url(challenge_type: str | None = None, accessible: bool = False) -> str:
+def embed_url(
+    challenge_type: str | None = None,
+    accessible: bool = False,
+    risk: str | None = None,
+) -> str:
     query = {
         "sitekey": SITE_KEY,
         "action": "submit",
@@ -24,6 +28,8 @@ def embed_url(challenge_type: str | None = None, accessible: bool = False) -> st
         query["challengeType"] = challenge_type
     if accessible:
         query["accessible"] = "1"
+    if risk:
+        query["risk"] = risk
     query["test"] = "1"
     return f"{BASE}/embed?{urlencode(query)}"
 
@@ -132,7 +138,7 @@ def canvas_target(page: Page) -> tuple[float, float]:
     return float(point["x"]), float(point["y"])
 
 
-def solve_motion(page: Page) -> None:
+def solve_motion(page: Page, submit: bool = True) -> None:
     x, y = canvas_target(page)
     page.mouse.move(x, y)
     page.mouse.down()
@@ -145,8 +151,86 @@ def solve_motion(page: Page) -> None:
             break
     page.mouse.up()
     assert page.locator("#oc-submit").is_enabled(), "motion coverage never unlocked submit"
-    page.locator("#oc-submit").click()
-    wait_for_status(page, "验证成功")
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def pattern_sequence(seed: int, length: int) -> list[int]:
+    value = seed & 0xFFFFFFFF
+    result = []
+    for _ in range(length):
+        value = (value * 1664525 + 1013904223) & 0xFFFFFFFF
+        result.append(int((value / 4294967296) * 4))
+    return result
+
+
+def solve_pattern(page: Page, state: dict, submit: bool = True) -> None:
+    pattern = state["patternMemory"]
+    sequence = pattern_sequence(pattern["seed"], pattern["sequenceLength"])
+    page.locator("#oc-pattern-play").click()
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.oc-pattern-button')].every((button) => !button.disabled)",
+        timeout=15_000,
+    )
+    for index in sequence:
+        page.locator(f'.oc-pattern-button[data-index="{index}"]').click()
+        page.wait_for_timeout(60)
+    assert page.locator("#oc-submit").is_enabled()
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def solve_key_pointer(page: Page, state: dict, submit: bool = True) -> None:
+    required_distance = state["keyPointer"]["requiredDistance"]
+    required_hold = state["keyPointer"]["requiredHoldMs"]
+    track = page.locator("#oc-gesture-track").bounding_box()
+    assert track
+    page.keyboard.down("Space")
+    page.mouse.move(track["x"] + 28, track["y"] + track["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(
+        track["x"] + min(track["width"] - 28, 30 + required_distance),
+        track["y"] + track["height"] / 2,
+        steps=8,
+    )
+    page.wait_for_timeout(required_hold + 250)
+    page.mouse.up()
+    page.keyboard.up("Space")
+    assert page.locator("#oc-submit").is_enabled()
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def solve_count(page: Page, state: dict, submit: bool = True) -> None:
+    page.locator("#oc-count-start").click()
+    page.wait_for_timeout(state["countFlash"]["revealMs"] + 250)
+    assert page.locator("#oc-answer").is_enabled()
+    page.locator("#oc-answer").fill(str(state["countFlash"]["count"]))
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def solve_market(page: Page, state: dict, submit: bool = True) -> None:
+    market = state["marketTrade"]
+    canvas = page.locator("#oc-market-canvas").bounding_box()
+    assert canvas
+    padding = 18
+    count = len(market["prices"])
+
+    def x_for(index: int) -> float:
+        return canvas["x"] + padding + (index / max(1, count - 1)) * (canvas["width"] - padding * 2)
+
+    page.locator("#oc-market-buy").click()
+    page.mouse.click(x_for(market["buyIndex"]), canvas["y"] + canvas["height"] / 2)
+    page.mouse.click(x_for(market["sellIndex"]), canvas["y"] + canvas["height"] / 2)
+    assert page.locator("#oc-submit").is_enabled()
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
 
 
 def screenshot_type(browser: Browser, challenge_type: str, viewport_name: str, viewport: dict[str, int]) -> None:
@@ -168,6 +252,15 @@ def screenshot_type(browser: Browser, challenge_type: str, viewport_name: str, v
         assert page.locator("#oc-expression").inner_text().count("×") == 2
     if challenge_type == "key_pointer":
         assert page.locator("#oc-gesture-track").is_visible()
+    if challenge_type == "pattern_memory":
+        assert page.locator(".oc-pattern-button").count() == 4
+        assert page.locator("#oc-pattern-play").is_visible()
+    if challenge_type == "count_flash":
+        assert page.locator("#oc-count-canvas").is_visible()
+        assert page.locator("#oc-count-start").is_visible()
+    if challenge_type == "market_trade":
+        assert page.locator("#oc-market-canvas").is_visible()
+        assert page.locator("#oc-market-buy").is_visible()
     page.screenshot(path=str(OUT / f"{viewport_name}-{challenge_type}.png"), full_page=True)
     assert not errors, errors
 
@@ -306,12 +399,101 @@ def run_key_pointer_checks(browser: Browser) -> None:
     assert not errors, errors
 
 
+def run_pattern_checks(browser: Browser) -> None:
+    page, errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
+    page.goto(embed_url("pattern_memory"), wait_until="networkidle")
+    state = challenge_state(page)
+    solve_pattern(page, state, submit=False)
+    page.locator("#oc-submit").click()
+    wait_for_status(page, "验证成功")
+    page.screenshot(path=str(OUT / "desktop-pattern-success.png"), full_page=True)
+    assert not errors, errors
+
+
+def run_count_checks(browser: Browser) -> None:
+    page, errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
+    page.goto(embed_url("count_flash"), wait_until="networkidle")
+    state = challenge_state(page)
+    solve_count(page, state, submit=False)
+    page.locator("#oc-submit").click()
+    wait_for_status(page, "验证成功")
+    page.screenshot(path=str(OUT / "desktop-count-success.png"), full_page=True)
+    assert not errors, errors
+
+
+def run_market_checks(browser: Browser) -> None:
+    page, errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
+    page.goto(embed_url("market_trade"), wait_until="networkidle")
+    state = challenge_state(page)
+    solve_market(page, state, submit=False)
+    page.locator("#oc-submit").click()
+    wait_for_status(page, "验证成功")
+    page.screenshot(path=str(OUT / "desktop-market-success.png"), full_page=True)
+    assert not errors, errors
+
+
 def run_accessible_check(browser: Browser) -> None:
     page, errors = open_page(browser, {"width": 390, "height": 844})
     page.goto(embed_url("grid_select", accessible=True), wait_until="networkidle")
     assert page.locator("body").get_attribute("data-challenge-type") == "inverse_occlusion"
     assert page.locator("#oc-answer").is_visible()
     assert_no_overflow(page)
+    assert not errors, errors
+
+
+def solve_current(page: Page, state: dict, submit: bool = True) -> None:
+    challenge_type = state["type"]
+    if challenge_type == "inverse_occlusion":
+        page.locator("#oc-answer").fill(state["visibleCode"])
+    elif challenge_type == "grid_select":
+        for index in state["grid"]["targetIndices"]:
+            page.locator(f'.oc-tile[data-index="{index}"]').click()
+    elif challenge_type == "motion_drag":
+        solve_motion(page, submit=False)
+    elif challenge_type == "audio_sequence":
+        answer = state["audioSequence"]["answerKey"]
+        page.locator(f'.oc-choice[data-choice="{answer}"]').click()
+    elif challenge_type == "calculation":
+        page.locator("#oc-answer").fill(state["calculation"]["answer"])
+    elif challenge_type == "key_pointer":
+        solve_key_pointer(page, state, submit=False)
+    elif challenge_type == "pattern_memory":
+        solve_pattern(page, state, submit=False)
+    elif challenge_type == "count_flash":
+        solve_count(page, state, submit=False)
+    elif challenge_type == "market_trade":
+        solve_market(page, state, submit=False)
+    else:
+        raise AssertionError(f"unsupported type {challenge_type}")
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def run_risk_session(browser: Browser) -> None:
+    page, errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
+    page.goto(embed_url(risk="medium"), wait_until="networkidle")
+    first_progress = page.locator(".oc-progress").inner_text()
+    assert first_progress.strip() == "1 / 4", first_progress
+
+    for step in range(1, 5):
+        state = challenge_state(page)
+        assert state["stepIndex"] + 1 == step, state
+        solve_current(page, state, submit=False)
+        previous_id = state["id"]
+        page.locator("#oc-submit").click()
+        if step < 4:
+            page.wait_for_function(
+                "(previousId) => document.querySelector('.oc-shell')?.getAttribute('data-challenge-id') !== previousId",
+                arg=previous_id,
+                timeout=15_000,
+            )
+            page.locator("#oc-form").wait_for()
+            page.wait_for_load_state("networkidle")
+        else:
+            wait_for_status(page, "验证成功")
+    assert page.locator(".oc-progress").inner_text().strip() == "4 / 4"
+    page.screenshot(path=str(OUT / "desktop-risk-session-success.png"), full_page=True)
     assert not errors, errors
 
 
@@ -412,6 +594,9 @@ with sync_playwright() as playwright:
         "audio_sequence",
         "calculation",
         "key_pointer",
+        "pattern_memory",
+        "count_flash",
+        "market_trade",
     ):
         for viewport_name, viewport in viewports.items():
             screenshot_type(browser, challenge_type, viewport_name, viewport)
@@ -422,7 +607,11 @@ with sync_playwright() as playwright:
     run_audio_checks(browser)
     run_calculation_checks(browser)
     run_key_pointer_checks(browser)
+    run_pattern_checks(browser)
+    run_count_checks(browser)
+    run_market_checks(browser)
     run_accessible_check(browser)
+    run_risk_session(browser)
     run_cross_origin_embed(browser)
     browser.close()
 

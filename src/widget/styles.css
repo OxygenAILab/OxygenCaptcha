@@ -426,6 +426,77 @@ button:disabled {
   outline-offset: 2px;
 }
 
+.oc-pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.oc-pattern-button {
+  display: grid;
+  place-items: center;
+  min-height: 84px;
+  padding: 0;
+  border: 1px solid #d7dee9;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #35445c;
+}
+
+.oc-pattern-button.is-flashing {
+  border-color: #2f6fed;
+  background: #dbe7ff;
+  color: #2f6fed;
+  transform: scale(.98);
+}
+
+.oc-pattern-button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.oc-count-wrap,
+.oc-market-wrap {
+  overflow: hidden;
+  border: 1px solid #cbd5e3;
+  border-radius: 6px;
+  background: #edf2f8;
+}
+
+.oc-count-wrap canvas,
+.oc-market-wrap canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.oc-market-wrap canvas {
+  cursor: crosshair;
+  touch-action: manipulation;
+}
+
+.oc-trade-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.oc-trade-button {
+  min-height: 44px;
+  border: 1px solid #cbd5e3;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #35445c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.oc-trade-button.is-active {
+  border-color: #2f6fed;
+  background: #eaf1ff;
+  color: #2f6fed;
+}
+
 .oc-controls {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -567,6 +638,8 @@ audio {
   .oc-icon-button,
   .oc-media-button,
   .oc-choice,
+  .oc-pattern-button,
+  .oc-trade-button,
   .oc-submit,
   .oc-text-button,
   .oc-tile {
@@ -583,7 +656,9 @@ audio {
   }
 
   .oc-media-button:hover,
-  .oc-choice:hover {
+  .oc-choice:hover,
+  .oc-pattern-button:hover,
+  .oc-trade-button:hover {
     border-color: #a9c3f7;
     background: #f2f6fd;
   }

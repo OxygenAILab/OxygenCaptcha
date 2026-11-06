@@ -1,6 +1,6 @@
 # OxygenChallenge API
 
-版本：`26.0.0-alpha.2`
+版本：`26.0.0-alpha.3`
 
 ## 先决条件
 
@@ -18,11 +18,21 @@
   "siteKey": "oc_public_demo",
   "action": "submit",
   "accessible": false,
-  "challengeType": "grid_select"
+  "challengeType": "grid_select",
+  "risk": "low"
 }
 ```
 
-`challengeType` 可选。不传时由服务端随机选择题型；正式接入通常不固定题型。
+`challengeType` 可选。显式指定时创建单题会话；不传时创建风险会话。`risk` 与步数：
+
+| `risk` | 步数 |
+|---|---:|
+| `low` | 3 |
+| `medium` | 4 |
+| `high` | 6 |
+| `critical` | 8 |
+
+测试或特殊接入可使用 `steps: 1..8` 覆盖步数。`accessible: true` 始终为单步反色题。
 
 | 类型 | 交互 |
 |---|---|
@@ -32,6 +42,9 @@
 | `audio_sequence` | 听取声音序列并选择目标动物 |
 | `calculation` | 输入大数四则运算结果 |
 | `key_pointer` | 同时按住空格键并向右拖动 |
+| `pattern_memory` | 观察并重复闪烁图标序列 |
+| `count_flash` | 记住短暂显示的圆点数量 |
+| `market_trade` | 在曲线低点买入、高点卖出 |
 
 `accessible: true` 会强制使用 `inverse_occlusion`，并提供 DTMF 音频替代。
 
@@ -43,6 +56,10 @@
   "type": "grid_select",
   "siteKey": "oc_public_demo",
   "action": "submit",
+  "sessionId": "random-session-id",
+  "step": 1,
+  "totalSteps": 3,
+  "risk": "low",
   "expiresAt": "2026-11-07T00:10:00.000Z",
   "maxAttempts": 3,
   "prompt": "选择所有包含“奖杯”的图标"
@@ -131,6 +148,45 @@
 }
 ```
 
+### 序列记忆
+
+```json
+{
+  "type": "pattern_memory",
+  "pattern": {
+    "seed": 123456,
+    "sequenceLength": 4
+  }
+}
+```
+
+序列由 `seed` 和共享伪随机算法生成，不直接下发顺序数组。
+
+### 瞬时计数
+
+```json
+{
+  "type": "count_flash",
+  "countFlash": {
+    "seed": 123456,
+    "revealMs": 900
+  }
+}
+```
+
+### 股市买卖
+
+```json
+{
+  "type": "market_trade",
+  "market": {
+    "seed": 123456,
+    "width": 360,
+    "height": 156
+  }
+}
+```
+
 ## 提交答案
 
 `POST /v1/challenges/:id/verify`
@@ -176,6 +232,23 @@
 }
 ```
 
+序列记忆仍使用 `selectedIndices`：
+
+```json
+{ "selectedIndices": [2, 0, 3, 1] }
+```
+
+市场买卖：
+
+```json
+{
+  "market": {
+    "buyIndex": 24,
+    "sellIndex": 84
+  }
+}
+```
+
 成功：
 
 ```json
@@ -185,9 +258,33 @@
   "assuranceLevel": "A1",
   "action": "submit",
   "siteKey": "oc_public_demo",
+  "sessionId": "random-session-id",
+  "risk": "medium",
+  "stepsCompleted": 4,
   "expiresAt": "2026-11-07T00:02:00.000Z"
 }
 ```
+
+多步会话的中间步骤不返回令牌：
+
+```json
+{
+  "verified": false,
+  "stepPassed": true,
+  "code": "STEP_PASSED",
+  "sessionId": "random-session-id",
+  "step": 2,
+  "totalSteps": 4,
+  "remainingSteps": 2,
+  "nextChallenge": {
+    "challengeId": "next-one-time-id",
+    "type": "audio_sequence"
+  },
+  "nextEmbedUrl": "https://captcha.oxygenai.top/embed?session=..."
+}
+```
+
+自定义客户端应继续提交 `nextChallenge.challengeId`，或打开 `nextEmbedUrl`。
 
 普通失败：
 
@@ -254,6 +351,7 @@
 | 200 | `INVALID_SELECTION` | 网格选择不精确 |
 | 200 | `INVALID_POINT` | 动态覆盖位置或时间无效 |
 | 200 | `INVALID_GESTURE` | 键盘与指针证据不足 |
+| 200 | `STEP_PASSED` | 会话中间步骤通过，尚未签发令牌 |
 | 200 | `ATTEMPTS_EXHAUSTED` | 尝试次数耗尽 |
 | 200 | `TOKEN_REPLAYED` | 验证令牌已消费 |
 

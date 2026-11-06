@@ -24,7 +24,12 @@ export type ChallengeType =
   | "motion_drag"
   | "audio_sequence"
   | "calculation"
-  | "key_pointer";
+  | "key_pointer"
+  | "pattern_memory"
+  | "count_flash"
+  | "market_trade";
+
+export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export type GridState = {
   itemKeys: string[];
@@ -56,11 +61,35 @@ export type KeyPointerState = {
   requiredHoldMs: number;
 };
 
+export type PatternMemoryState = {
+  seed: number;
+  sequenceLength: number;
+};
+
+export type CountFlashState = {
+  seed: number;
+  count: number;
+  revealMs: number;
+};
+
+export type MarketTradeState = {
+  seed: number;
+  width: number;
+  height: number;
+  prices: number[];
+  buyIndex: number;
+  sellIndex: number;
+};
+
 export type ChallengeEvidence = {
   answer?: string;
   selectedIndices?: number[];
   holdMs?: number;
   distance?: number;
+  market?: {
+    buyIndex: number;
+    sellIndex: number;
+  };
   point?: {
     x: number;
     y: number;
@@ -82,6 +111,13 @@ export type ChallengeState = {
   audioSequence?: AudioSequenceState;
   calculation?: CalculationState;
   keyPointer?: KeyPointerState;
+  patternMemory?: PatternMemoryState;
+  countFlash?: CountFlashState;
+  marketTrade?: MarketTradeState;
+  sessionId?: string;
+  stepIndex?: number;
+  totalSteps?: number;
+  risk?: RiskLevel;
   parentOrigin: string | null;
   createdAt: number;
   expiresAt: number;
@@ -97,7 +133,26 @@ export type ChallengeReceipt = {
   assuranceLevel: "A1";
   action: string;
   siteKey: string;
+  sessionId: string;
+  risk: RiskLevel;
+  stepsCompleted: number;
   expiresAt: string;
+};
+
+export type ChallengeSessionState = {
+  id: string;
+  siteKey: string;
+  action: string;
+  parentOrigin: string | null;
+  accessible: boolean;
+  risk: RiskLevel;
+  challengeIds: string[];
+  currentStep: number;
+  totalSteps: number;
+  createdAt: number;
+  expiresAt: number;
+  completed: boolean;
+  testMode: boolean;
 };
 
 export type ChallengeFailure = {

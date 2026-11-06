@@ -1,7 +1,7 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.2` 提供 API-only 服务、
-可嵌入 Web Component、跨域 iframe、一次性验证令牌和六类交互挑战：
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.3` 提供 API-only 服务、
+可嵌入 Web Component、跨域 iframe、一次性验证令牌、风险会话和九类交互挑战：
 
 - `inverse_occlusion`：同色 DOM 诱饵 + 反色透明数字图。
 - `grid_select`：3×3 Lucide 图标多选。
@@ -9,6 +9,12 @@
 - `audio_sequence`：程序合成动物声音序列，选择猫叫之后的动物。
 - `calculation`：需要计算器的大数四则运算。
 - `key_pointer`：同时按住空格键并拖动滑块的组合输入。
+- `pattern_memory`：观察并重复随机闪烁的图标序列。
+- `count_flash`：记住瞬时出现的小规模圆点数量。
+- `market_trade`：在价格曲线低点买入、高点卖出。
+
+`low` 风险会话为 3 步，`medium/high/critical` 分别为 4/6/8 步。显式指定
+`challengeType` 或使用无障碍模式时保持单步；中间步骤不会签发令牌，最后一步通过后才签发。
 
 服务没有仪表盘，只暴露 Challenge、资源、嵌入页和 `siteverify` 接口。视觉采用紧凑白色
 验证卡、冷灰画布、统一蓝色强调色、44px 触控目标和自动尺寸 iframe。
@@ -41,6 +47,7 @@ python tests/browser_smoke.py
   <oxygen-challenge
     sitekey="oc_public_demo"
     action="submit"
+    risk="medium"
   ></oxygen-challenge>
   <button type="submit">提交</button>
 </form>
@@ -48,13 +55,14 @@ python tests/browser_smoke.py
 
 成功后会向最近的 `form` 插入名为 `oxygen-token` 的隐藏字段，并触发
 `oxygenchallenge:verified` 事件。可通过 `challenge-type` 固定题型，通过
-`accessible="true"` 强制反色无障碍模式。
+`risk` 控制会话步数，通过 `accessible="true"` 强制单步反色无障碍模式。
 
 ```html
 <oxygen-challenge
   sitekey="oc_public_demo"
   action="submit"
   challenge-type="motion_drag"
+  risk="low"
   name="human-token"
 ></oxygen-challenge>
 ```
@@ -91,8 +99,9 @@ python tests/browser_smoke.py
 
 - Challenge ID 为随机 144 bit，默认 300 秒过期，最多 3 次尝试。
 - 反色题正确答案不进入 HTML、DOM、JSON 或 SVG 文本节点。
-- 网格正确索引、声音答案和计算结果只保存在服务端。
+- 网格索引、序列、声音答案、计数结果、市场极值和计算结果只保存在服务端。
 - `siteverify` 令牌使用 Ed25519 签名，默认 120 秒有效并原子消费。
+- 风险会话只在最后一步签发令牌，并绑定单个 session/action/site。
 - CORS、Origin/Referer 白名单、CSP、`no-store`、限速和结构化风险日志默认开启。
 - 当前状态存储为单进程内存；多实例部署前必须迁移到 Redis/Valkey。
 

@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { renderAnimalSequenceWave, renderDtmfWave } from "./audio.js";
-import { ChallengeStore, type VerificationResult } from "./challenge.js";
+import { ChallengeStore, RISK_STEPS, type VerificationResult } from "./challenge.js";
 import { loadConfig } from "./config.js";
 import { renderGridItemSvg, renderTargetSvg } from "./grid.js";
 import { renderChallengeSvg } from "./render.js";
@@ -28,13 +28,20 @@ const CHALLENGE_TYPES = [
   "audio_sequence",
   "calculation",
   "key_pointer",
+  "pattern_memory",
+  "count_flash",
+  "market_trade",
 ] as const;
+
+const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 
 const createSchema = z.object({
   siteKey: z.string().min(3).max(128),
   action: z.string().min(1).max(64).default("submit"),
   accessible: z.boolean().default(false),
   challengeType: z.enum(CHALLENGE_TYPES).optional(),
+  risk: z.enum(RISK_LEVELS).default("low"),
+  steps: z.number().int().min(1).max(8).optional(),
 });
 
 const verifySchema = z.object({
@@ -42,6 +49,12 @@ const verifySchema = z.object({
   selectedIndices: z.array(z.number().int().min(0).max(8)).max(9).optional(),
   holdMs: z.number().int().min(0).max(9_000).optional(),
   distance: z.number().min(0).max(1_200).optional(),
+  market: z
+    .object({
+      buyIndex: z.number().int().min(0).max(200),
+      sellIndex: z.number().int().min(0).max(200),
+    })
+    .optional(),
   point: z
     .object({
       x: z.number().finite(),
@@ -52,12 +65,17 @@ const verifySchema = z.object({
 });
 
 const embedSchema = z.object({
-  sitekey: z.string().min(3).max(128),
+  sitekey: z.string().min(3).max(128).optional(),
+  session: z.string().min(8).max(128).optional(),
   action: z.string().min(1).max(64).default("submit"),
   parentOrigin: z.string().url().optional(),
   challengeType: z.enum(CHALLENGE_TYPES).optional(),
+  risk: z.enum(RISK_LEVELS).default("low"),
+  steps: z.coerce.number().int().min(1).max(8).optional(),
   accessible: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   test: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
+}).refine((value) => Boolean(value.sitekey || value.session), {
+  message: "sitekey or session is required",
 });
 
 const siteverifySchema = z.object({
@@ -95,6 +113,10 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
     type: state.type,
     siteKey: state.siteKey,
     action: state.action,
+    sessionId: state.sessionId,
+    step: (state.stepIndex ?? 0) + 1,
+    totalSteps: state.totalSteps ?? 1,
+    risk: state.risk ?? "low",
     expiresAt: new Date(state.expiresAt).toISOString(),
     maxAttempts: state.maxAttempts,
   };
@@ -146,6 +168,40 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
       prompt: "按住空格键，同时向右拖动滑块并保持片刻",
       requiredDistance: state.keyPointer.requiredDistance,
       requiredHoldMs: state.keyPointer.requiredHoldMs,
+    };
+  }
+
+  if (state.type === "pattern_memory" && state.patternMemory) {
+    return {
+      ...common,
+      prompt: "按顺序重复闪烁序列",
+      pattern: {
+        seed: state.patternMemory.seed,
+        sequenceLength: state.patternMemory.sequenceLength,
+      },
+    };
+  }
+
+  if (state.type === "count_flash" && state.countFlash) {
+    return {
+      ...common,
+      prompt: "观察短暂出现的圆点数量",
+      countFlash: {
+        seed: state.countFlash.seed,
+        revealMs: state.countFlash.revealMs,
+      },
+    };
+  }
+
+  if (state.type === "market_trade" && state.marketTrade) {
+    return {
+      ...common,
+      prompt: "在低点买入，在高点卖出",
+      market: {
+        seed: state.marketTrade.seed,
+        width: state.marketTrade.width,
+        height: state.marketTrade.height,
+      },
     };
   }
 
@@ -274,6 +330,85 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
       </div>`;
   }
 
+  if (state.type === "pattern_memory" && state.patternMemory) {
+    const patternButtons = Array.from({ length: 4 }, (_, index) => `
+      <button class="oc-pattern-button" type="button" data-index="${index}" aria-label="序列图标 ${index + 1}" disabled>
+        <span class="oc-pattern-icon" aria-hidden="true"></span>
+      </button>`).join("");
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">序列记忆</p>
+          <p class="oc-prompt" id="oc-prompt">看一遍闪烁顺序，再按相同顺序点击</p>
+        </div>
+        <span class="oc-difficulty">${state.patternMemory.sequenceLength} 步</span>
+      </div>
+      <div class="oc-pattern-grid" id="oc-pattern-grid"
+           data-seed="${state.patternMemory.seed}"
+           data-length="${state.patternMemory.sequenceLength}"
+           role="group" aria-labelledby="oc-prompt">${patternButtons}</div>
+      <button class="oc-media-button" id="oc-pattern-play" type="button">
+        <span class="oc-media-icon" aria-hidden="true"></span>
+        <span>播放序列</span>
+      </button>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
+      </div>`;
+  }
+
+  if (state.type === "count_flash" && state.countFlash) {
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">瞬时计数</p>
+          <p class="oc-prompt" id="oc-prompt">记住画面短暂出现的圆点数量</p>
+        </div>
+        <span class="oc-difficulty">约 1 秒</span>
+      </div>
+      <div class="oc-count-wrap">
+        <canvas id="oc-count-canvas" width="360" height="170"
+                data-seed="${state.countFlash.seed}"
+                data-reveal="${state.countFlash.revealMs}"
+                aria-label="短暂显示圆点的区域"></canvas>
+      </div>
+      <button class="oc-media-button" id="oc-count-start" type="button">
+        <span class="oc-media-icon" aria-hidden="true"></span>
+        <span>开始观察</span>
+      </button>
+      <div class="oc-controls">
+        <label class="oc-field" for="oc-answer">
+          <span class="oc-label">圆点数量</span>
+          <input id="oc-answer" name="answer" type="text" inputmode="numeric" autocomplete="off"
+                 maxlength="2" pattern="[0-9]*" placeholder="输入看到的数量" disabled required>
+        </label>
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
+      </div>`;
+  }
+
+  if (state.type === "market_trade" && state.marketTrade) {
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">市场时机</p>
+          <p class="oc-prompt" id="oc-prompt">在低点买入，在高点卖出</p>
+        </div>
+        <span class="oc-difficulty">微型游戏</span>
+      </div>
+      <div class="oc-market-wrap">
+        <canvas id="oc-market-canvas" width="${state.marketTrade.width}" height="${state.marketTrade.height}"
+                data-seed="${state.marketTrade.seed}"
+                aria-label="股票价格走势图"></canvas>
+      </div>
+      <div class="oc-trade-actions" role="group" aria-label="交易方向">
+        <button class="oc-trade-button is-active" id="oc-market-buy" type="button" aria-pressed="true">买入</button>
+        <button class="oc-trade-button" id="oc-market-sell" type="button" aria-pressed="false">卖出</button>
+      </div>
+      <p class="oc-helper" id="oc-market-help">先在图表上选择买入点，再选择卖出点。</p>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
+      </div>`;
+  }
+
   const backgroundColor = escapeHtml(state.backgroundColor ?? "#172033");
   const inverseColor = escapeHtml(state.inverseColor ?? "#f4e0cc");
   return `
@@ -309,8 +444,8 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
   <link rel="stylesheet" href="${escapeHtml(apiBase(config))}/widget.css">
   <script defer src="${escapeHtml(apiBase(config))}/frame.js"></script>
 </head>
-<body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}">
-  <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-parent-origin="${escapeHtml(parentOrigin)}">
+<body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}">
+  <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}">
     <form class="oc-card" id="oc-form" novalidate>
       <header class="oc-header">
         <div class="oc-brand">
@@ -330,7 +465,7 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
         <span class="oc-brand-note">安全验证由 OxygenChallenge 提供</span>
         <div class="oc-footer-actions">
           <button class="oc-text-button" id="oc-accessible" type="button" aria-label="切换到无障碍验证">无障碍验证</button>
-          <span class="oc-progress">1 / 1</span>
+          <span class="oc-progress">${(state.stepIndex ?? 0) + 1} / ${state.totalSteps ?? 1}</span>
         </div>
       </footer>
       <span class="oc-status" id="oc-status" role="status" aria-live="polite"></span>
@@ -424,9 +559,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     reply.type("application/json");
     return {
       name: "OxygenChallenge",
-      version: "v26.0-alpha.2",
+      version: "v26.0-alpha.3",
       mode: "api-only",
       challengeTypes: CHALLENGE_TYPES,
+      riskLevels: RISK_STEPS,
       endpoints: {
         challenge: "/v1/challenges",
         challengeAssets: "/v1/challenges/:id/*",
@@ -493,6 +629,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       origin,
       parsed.data.accessible,
       parsed.data.challengeType,
+      parsed.data.risk,
+      parsed.data.steps,
     );
 
     reply.header("X-Oxygen-Challenge-Id", state.id);
@@ -515,11 +653,28 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       ...(parsed.data.selectedIndices ? { selectedIndices: parsed.data.selectedIndices } : {}),
       ...(parsed.data.holdMs !== undefined ? { holdMs: parsed.data.holdMs } : {}),
       ...(parsed.data.distance !== undefined ? { distance: parsed.data.distance } : {}),
+      ...(parsed.data.market ? { market: parsed.data.market } : {}),
       ...(parsed.data.point ? { point: parsed.data.point } : {}),
     });
     logVerification(request, state, result);
     if (result.kind === "verified") {
       return reply.send(result.receipt);
+    }
+    if (result.kind === "step") {
+      const nextChallenge = serializeChallenge(result.nextState, config);
+      return reply.send({
+        verified: false,
+        stepPassed: true,
+        code: "STEP_PASSED",
+        sessionId: result.session.id,
+        step: result.session.currentStep,
+        totalSteps: result.session.totalSteps,
+        remainingSteps: result.session.totalSteps - result.session.currentStep,
+        nextChallenge,
+        nextEmbedUrl: `${apiBase(config)}/embed?session=${encodeURIComponent(result.session.id)}${
+          result.session.testMode && config.nodeEnv !== "production" ? "&test=1" : ""
+        }`,
+      });
     }
 
     const code = result.failure.code === "HONEYPOT_TRIGGERED" ? "INVALID_ANSWER" : result.failure.code;
@@ -616,37 +771,62 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       return reply.code(400).type("text/html").send(errorPage(400, "嵌入参数不完整"));
     }
 
-    const site = getSite(config, parsed.data.sitekey);
-    if (!site) {
-      return reply.code(404).type("text/html").send(errorPage(404, "站点密钥无效"));
-    }
-    if (!siteAllowsAction(site, parsed.data.action)) {
-      return reply.code(403).type("text/html").send(errorPage(403, "动作未授权"));
-    }
+    let testMode = parsed.data.test && config.nodeEnv !== "production";
+    let state: ChallengeState | undefined;
+    if (parsed.data.session) {
+      const session = challenges.getSession(parsed.data.session);
+      if (!session) {
+        return reply.code(410).type("text/html").send(errorPage(410, "会话已过期"));
+      }
+      const site = getSite(config, session.siteKey);
+      if (!site || !siteAllowsAction(site, session.action)) {
+        return reply.code(403).type("text/html").send(errorPage(403, "会话不可用"));
+      }
+      if (!siteAllowsOrigin(site, session.parentOrigin)) {
+        return reply.code(403).type("text/html").send(errorPage(403, "嵌入来源未授权"));
+      }
+      testMode = session.testMode && config.nodeEnv !== "production";
+      state = challenges.currentState(session.id);
+    } else {
+      const siteKey = parsed.data.sitekey;
+      const site = siteKey ? getSite(config, siteKey) : undefined;
+      if (!site || !siteKey) {
+        return reply.code(404).type("text/html").send(errorPage(404, "站点密钥无效"));
+      }
+      if (!siteAllowsAction(site, parsed.data.action)) {
+        return reply.code(403).type("text/html").send(errorPage(403, "动作未授权"));
+      }
 
-    const refererOrigin = requestOrigin(request.headers.origin, request.headers.referer);
-    const requestedParent = parsed.data.parentOrigin
-      ? requestOrigin(parsed.data.parentOrigin, undefined)
-      : null;
-    const parentOrigin =
-      requestedParent && siteAllowsOrigin(site, requestedParent) ? requestedParent : refererOrigin;
-    if (!siteAllowsOrigin(site, parentOrigin)) {
-      return reply.code(403).type("text/html").send(errorPage(403, "嵌入来源未授权"));
-    }
+      const refererOrigin = requestOrigin(request.headers.origin, request.headers.referer);
+      const requestedParent = parsed.data.parentOrigin
+        ? requestOrigin(parsed.data.parentOrigin, undefined)
+        : null;
+      const parentOrigin =
+        requestedParent && siteAllowsOrigin(site, requestedParent) ? requestedParent : refererOrigin;
+      if (!siteAllowsOrigin(site, parentOrigin)) {
+        return reply.code(403).type("text/html").send(errorPage(403, "嵌入来源未授权"));
+      }
 
-    const state = challenges.create(
-      parsed.data.sitekey,
-      parsed.data.action,
-      parentOrigin,
-      parsed.data.accessible,
-      parsed.data.challengeType,
-    );
+      state = challenges.create(
+        siteKey,
+        parsed.data.action,
+        parentOrigin,
+        parsed.data.accessible,
+        parsed.data.challengeType,
+        parsed.data.risk,
+        parsed.data.steps,
+        testMode,
+      );
+    }
+    if (!state) {
+      return reply.code(410).type("text/html").send(errorPage(410, "挑战已过期"));
+    }
     reply
       .type("text/html; charset=utf-8")
       .header("Cache-Control", "no-store")
       .header("X-Robots-Tag", "noindex, nofollow")
       .header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'self'");
-    return reply.send(embedHtml(state, config, parsed.data.test && config.nodeEnv !== "production"));
+    return reply.send(embedHtml(state, config, testMode));
   });
 
   app.post("/v1/siteverify", async (request, reply) => {
@@ -700,6 +880,20 @@ function logVerification(
     request.log.info(
       { event: "challenge.verified", challengeId: state.id, siteKey: state.siteKey },
       "challenge verified",
+    );
+    return;
+  }
+  if (result.kind === "step") {
+    request.log.info(
+      {
+        event: "challenge.step",
+        challengeId: state.id,
+        sessionId: result.session.id,
+        siteKey: state.siteKey,
+        step: result.session.currentStep,
+        totalSteps: result.session.totalSteps,
+      },
+      "challenge step passed",
     );
     return;
   }
