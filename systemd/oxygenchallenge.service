@@ -1,0 +1,23 @@
+[Unit]
+Description=OxygenChallenge CAPTCHA API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oxygenchallenge
+Group=oxygenchallenge
+WorkingDirectory=/opt/oxygenchallenge
+EnvironmentFile=/opt/oxygenchallenge/.env
+ExecStart=/usr/local/bin/node --env-file-if-exists=.env /opt/oxygenchallenge/dist/server.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/oxygenchallenge
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

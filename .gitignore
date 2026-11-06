@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+_devdocs/
+scripts/deploy_hk.py
+scripts/hcaptcha_reference.py
+scripts/notify_dns.py
+*.log
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+Thumbs.db

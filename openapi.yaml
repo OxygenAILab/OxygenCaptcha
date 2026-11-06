@@ -1,0 +1,391 @@
+openapi: 3.1.0
+info:
+  title: OxygenChallenge API
+  version: 26.0.0-alpha.2
+  description: Risk-aware CAPTCHA API with visual, motion, audio, calculation and dual-input challenges.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: https://captcha.oxygenai.top
+security: []
+paths:
+  /v1/challenges:
+    post:
+      operationId: createChallenge
+      summary: Create a one-time challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChallengeRequest"
+      responses:
+        "200":
+          description: Challenge created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeResponse"
+        "400":
+          description: Invalid request
+        "403":
+          description: Origin or action denied
+        "404":
+          description: Site key not found
+  /v1/challenges/{id}/verify:
+    post:
+      operationId: verifyChallenge
+      summary: Verify a challenge response
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChallengeEvidence"
+      responses:
+        "200":
+          description: Verification result or a generic failure
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/VerificationReceipt"
+                  - $ref: "#/components/schemas/VerificationFailure"
+        "410":
+          description: Challenge expired or consumed
+  /v1/challenges/{id}/overlay.svg:
+    get:
+      operationId: getInverseOverlay
+      summary: Get the inverse-occlusion digit SVG
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: SVG image
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "410":
+          description: Challenge expired or wrong type
+  /v1/challenges/{id}/audio.wav:
+    get:
+      operationId: getAccessibilityAudio
+      summary: Get the DTMF accessibility audio
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: WAV audio
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Challenge expired or wrong type
+  /v1/challenges/{id}/target.svg:
+    get:
+      operationId: getGridTarget
+      summary: Get the grid target SVG
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: SVG target image
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "410":
+          description: Challenge expired or wrong type
+  /v1/challenges/{id}/tile/{index}.svg:
+    get:
+      operationId: getGridTile
+      summary: Get a grid tile SVG
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+        - in: path
+          name: index
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 8
+      responses:
+        "200":
+          description: SVG tile image
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "410":
+          description: Challenge expired or wrong type
+  /v1/challenges/{id}/sequence.wav:
+    get:
+      operationId: getAudioSequence
+      summary: Get the synthesized animal sound sequence
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: WAV sequence
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Challenge expired or wrong type
+  /v1/siteverify:
+    post:
+      operationId: siteverify
+      summary: Consume a verification token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [secret, response]
+              properties:
+                secret:
+                  type: string
+                response:
+                  type: string
+                action:
+                  type: string
+      responses:
+        "200":
+          description: Site verification result
+        "400":
+          description: Invalid request
+  /embed:
+    get:
+      operationId: renderEmbed
+      summary: Render the embeddable challenge page
+      parameters:
+        - in: query
+          name: sitekey
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: action
+          required: false
+          schema:
+            type: string
+            default: submit
+        - in: query
+          name: parentOrigin
+          required: false
+          schema:
+            type: string
+            format: uri
+        - in: query
+          name: challengeType
+          required: false
+          schema:
+            $ref: "#/components/schemas/ChallengeType"
+        - in: query
+          name: accessible
+          required: false
+          schema:
+            type: string
+            enum: ["0", "1"]
+      responses:
+        "200":
+          description: HTML widget
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Invalid embed parameters
+        "403":
+          description: Origin or action denied
+        "404":
+          description: Site key not found
+  /healthz:
+    get:
+      operationId: healthcheck
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+        "404":
+          description: Unknown health route
+        "503":
+          description: Service unavailable
+components:
+  parameters:
+    ChallengeId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+  schemas:
+    ChallengeType:
+      type: string
+      enum:
+        - inverse_occlusion
+        - grid_select
+        - motion_drag
+        - audio_sequence
+        - calculation
+        - key_pointer
+    CreateChallengeRequest:
+      type: object
+      required: [siteKey]
+      properties:
+        siteKey:
+          type: string
+        action:
+          type: string
+          default: submit
+        accessible:
+          type: boolean
+          default: false
+        challengeType:
+          $ref: "#/components/schemas/ChallengeType"
+    ChallengeResponse:
+      type: object
+      required: [challengeId, type, siteKey, action, expiresAt, prompt, maxAttempts]
+      properties:
+        challengeId:
+          type: string
+        type:
+          $ref: "#/components/schemas/ChallengeType"
+        siteKey:
+          type: string
+        action:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        prompt:
+          type: string
+        maxAttempts:
+          type: integer
+        backgroundColor:
+          type: string
+        inverseColor:
+          type: string
+        overlayUrl:
+          type: string
+          format: uri
+        audioUrl:
+          type: string
+          format: uri
+        decoyText:
+          type: string
+        targetName:
+          type: string
+        targetUrl:
+          type: string
+          format: uri
+        tileUrls:
+          type: array
+          items:
+            type: string
+            format: uri
+        motion:
+          type: object
+          properties:
+            seed:
+              type: integer
+            width:
+              type: number
+            height:
+              type: number
+            durationMs:
+              type: integer
+        options:
+          type: array
+          items:
+            type: object
+            required: [key, label]
+            properties:
+              key:
+                type: string
+                enum: [cat, dog, bird]
+              label:
+                type: string
+        expression:
+          type: string
+        requiredDistance:
+          type: number
+        requiredHoldMs:
+          type: integer
+    ChallengeEvidence:
+      type: object
+      properties:
+        answer:
+          type: string
+        selectedIndices:
+          type: array
+          maxItems: 9
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 0
+            maximum: 8
+        point:
+          type: object
+          required: [x, y, elapsedMs]
+          properties:
+            x:
+              type: number
+            y:
+              type: number
+            elapsedMs:
+              type: integer
+        holdMs:
+          type: integer
+          minimum: 0
+        distance:
+          type: number
+          minimum: 0
+    VerificationReceipt:
+      type: object
+      required: [verified, token, assuranceLevel, action, siteKey, expiresAt]
+      properties:
+        verified:
+          type: boolean
+          const: true
+        token:
+          type: string
+        assuranceLevel:
+          type: string
+          const: A1
+        action:
+          type: string
+        siteKey:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    VerificationFailure:
+      type: object
+      required: [verified, code]
+      properties:
+        verified:
+          type: boolean
+          const: false
+        code:
+          type: string
+          enum:
+            - INVALID_ANSWER
+            - INVALID_SELECTION
+            - INVALID_POINT
+            - INVALID_GESTURE
+            - ATTEMPTS_EXHAUSTED
+            - CHALLENGE_EXPIRED
+            - CHALLENGE_USED
+            - CHALLENGE_NOT_FOUND
+        remainingAttempts:
+          type: integer

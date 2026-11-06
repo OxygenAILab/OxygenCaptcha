@@ -1,0 +1,71 @@
+# 部署运维
+
+## 环境变量
+
+| 变量 | 必填 | 示例 | 说明 |
+|---|---:|---|---|
+| `NODE_ENV` | 是 | `production` | 生产环境 |
+| `HOST` | 是 | `127.0.0.1` | 仅监听本机 |
+| `PORT` | 是 | `8791` | 服务端口 |
+| `PUBLIC_ORIGIN` | 是 | `https://captcha.oxygenai.top` | 对外地址 |
+| `OXY_SITES_JSON` | 是 | JSON | 站点密钥、origin、actions |
+| `OXY_TOKEN_SEED_BASE64` | 是 | base64 | 32 字节 Ed25519 seed |
+| `CHALLENGE_TTL_SECONDS` | 否 | `300` | Challenge 总有效期 |
+| `TOKEN_TTL_SECONDS` | 否 | `120` | 验证令牌有效期 |
+| `MAX_ATTEMPTS` | 否 | `3` | 单题最大尝试次数 |
+| `RATE_LIMIT_MAX` | 否 | `120` | 每 IP 每分钟请求上限 |
+
+`OXY_SITES_JSON` 的 secret 只放在服务器环境，不写进仓库或前端。
+当前公共演示 key 的 secret 与 token seed 已登记在
+`C:\Users\Sails\.codex\private\AGENTS-secrets.md` 的 `OxygenChallenge` 小节。
+
+## 构建
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+浏览器回归：
+
+```powershell
+$env:RATE_LIMIT_MAX = "10000"
+python -m py_compile tests/browser_smoke.py
+python tests/browser_smoke.py
+```
+
+回归会覆盖六个题型、390px 移动端、动态指针轨迹、键盘双输入、诱饵命中、
+`accessible=1` 和跨域 Web Component。截图写入 `_devdocs/evidence/`，不提交到 Public 仓库。
+
+## systemd
+
+`systemd/oxygenchallenge.service` 是模板。部署后：
+
+```bash
+systemctl daemon-reload
+systemctl enable --now oxygenchallenge
+systemctl status oxygenchallenge
+```
+
+## Nginx
+
+使用 `deploy/nginx-captcha.conf` 作为反向代理模板：
+
+- 只反代到 `127.0.0.1:8791`。
+- 不缓存 `/v1/` 和 `/embed`。
+- 传递 `Host`、`X-Real-IP`、`X-Forwarded-For`。
+- API 和 Widget 使用同一 host，避免跨域。
+
+## 健康检查
+
+```bash
+curl -fsS http://127.0.0.1:8791/healthz
+```
+
+## 扩容
+
+当前 Challenge 和令牌消费状态在单进程内存中。扩展为多实例前必须迁移到 Redis/Valkey，并保证 challenge 消费和 token replay 检查原子化。
+
+<!-- G itHub@OxygenAILab | OxygenAILab@StarsailsClo ver -->
