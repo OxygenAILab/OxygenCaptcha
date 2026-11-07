@@ -46,7 +46,7 @@ python tests/browser_smoke.py
 回归会覆盖十五个题型、390px 移动端、动态指针轨迹、键盘双输入、序列记忆、瞬时计数、
 股市买卖、基础交互、方向校准、语义选择、手部动作测试注入、读写声学测试注入、风险会话
 逐题推进、诱饵命中、`accessible=1`、官网、`/captcha`、开放平台和跨域 Web Component。
-截图写入 `_devdocs/evidence/`，不提交到 Public 仓库。
+截图写入 `_devdocs/evidence/`，不提交到 Private 仓库。
 
 ## systemd
 
