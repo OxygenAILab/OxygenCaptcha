@@ -19,6 +19,10 @@
   low/medium/high/critical 风险步数。
 - 官网 `/`、随机挑战 `/captcha`、`/platform` 和 OxygenAccount OAuth 入口均已上线；
   官网顶部横幅会自动识别语言并支持中英文切换。
+- 私有源码与发布仓库为 `OxygenAILab/OxygenChallenge`，原 `OxygenAILab/OxygenCaptcha`
+  已归档；`main`、开发分支和签名 tag `v26.0-alpha.4` 均已推送。
+- OxygenAccount OAuth 已完成真实端到端回归：登录、授权、回调、开放平台会话与昵称资料
+  均成功，头像字段在资料存在时展示。
 - 远程 Playwright 在桌面与 390px 视口验证官网、随机挑战、基础交互、Turnstile 组件、
   麦克风/摄像头权限替代、开放平台和跨域 Web Component。
 - 手部动作使用本地 vendored MediaPipe Hand Landmarker；模型完整性为
