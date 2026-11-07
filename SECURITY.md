@@ -8,7 +8,7 @@ leakage, denial of service, or privacy defects.
 Report security issues privately to the repository maintainers through GitHub Security
 Advisories:
 
-<https://github.com/OxygenAILab/OxygenCaptcha/security/advisories/new>
+<https://github.com/OxygenAILab/OxygenChallenge/security/advisories/new>
 
 Include the affected version, reproduction steps, expected impact, and whether production data
 or challenge tokens were exposed.
@@ -30,6 +30,8 @@ The following are known limitations, not vulnerabilities by themselves:
 - Automated browsers can synthesize keyboard and pointer events.
 - Calculation challenges are easy for computers.
 - The current in-memory store is not suitable for multi-instance deployment.
+- Camera and microphone challenges require explicit user permission and have dedicated
+  accessibility fallbacks.
 
 ## Supported Versions
 

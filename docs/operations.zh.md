@@ -14,6 +14,13 @@
 | `TOKEN_TTL_SECONDS` | 否 | `120` | 验证令牌有效期 |
 | `MAX_ATTEMPTS` | 否 | `3` | 单题最大尝试次数 |
 | `RATE_LIMIT_MAX` | 否 | `120` | 每 IP 每分钟请求上限 |
+| `TURNSTILE_SITE_KEY` | 否 | `0x...` | Cloudflare Turnstile 公钥 |
+| `TURNSTILE_SECRET_KEY` | 否 | - | Cloudflare Turnstile secret，只放服务端 |
+| `OXY_PLATFORM_DATA_FILE` | 否 | `/opt/oxygenchallenge/data/platform.json` | 开放平台应用数据文件 |
+| `OXY_PLATFORM_DATA_KEY_BASE64` | 开放平台 | base64 | 32 字节 AES-256-GCM 数据密钥 |
+| `OXYGENACCOUNT_ISSUER` | 开放平台 | `https://account.oxygenai.top` | OxygenAccount OIDC issuer |
+| `OXYGENACCOUNT_CLIENT_ID` | 开放平台 | - | OAuth client id |
+| `OXYGENACCOUNT_CLIENT_SECRET` | 开放平台 | - | OAuth client secret |
 
 `OXY_SITES_JSON` 的 secret 只放在服务器环境，不写进仓库或前端。
 当前公共演示 key 的 secret 与 token seed 已登记在
@@ -36,8 +43,9 @@ python -m py_compile tests/browser_smoke.py
 python tests/browser_smoke.py
 ```
 
-回归会覆盖九个题型、390px 移动端、动态指针轨迹、键盘双输入、序列记忆、瞬时计数、
-股市买卖、风险会话逐题推进、诱饵命中、`accessible=1` 和跨域 Web Component。
+回归会覆盖十五个题型、390px 移动端、动态指针轨迹、键盘双输入、序列记忆、瞬时计数、
+股市买卖、基础交互、方向校准、语义选择、手部动作测试注入、读写声学测试注入、风险会话
+逐题推进、诱饵命中、`accessible=1`、官网、`/captcha`、开放平台和跨域 Web Component。
 截图写入 `_devdocs/evidence/`，不提交到 Public 仓库。
 
 ## systemd

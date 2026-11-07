@@ -497,6 +497,276 @@ button:disabled {
   color: #2f6fed;
 }
 
+.oc-choice-grid-four {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.oc-semantic-choice {
+  min-height: 64px;
+}
+
+.oc-human-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 84px;
+  padding: 14px;
+  border: 1px solid #cbd5e3;
+  border-radius: 6px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.oc-human-check input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.oc-human-box {
+  position: relative;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border: 2px solid #8a99ad;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.oc-human-check input:checked + .oc-human-box {
+  border-color: #2f6fed;
+  background: #2f6fed;
+}
+
+.oc-human-check input:checked + .oc-human-box::after {
+  position: absolute;
+  left: 7px;
+  top: 3px;
+  width: 7px;
+  height: 12px;
+  content: "";
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.oc-human-check input:focus-visible + .oc-human-box {
+  outline: 2px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.oc-human-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.oc-human-copy strong {
+  font-size: 15px;
+}
+
+.oc-human-copy small {
+  color: #637086;
+  font-size: 12px;
+}
+
+.oc-rotate-stage {
+  display: grid;
+  place-items: center;
+  min-height: 146px;
+  border: 1px solid #cbd5e3;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.oc-rotate-object {
+  position: relative;
+  width: 74px;
+  height: 74px;
+  border: 2px solid #2f6fed;
+  border-radius: 14px;
+  background: #eaf1ff;
+  transition: transform 100ms ease-out;
+}
+
+.oc-rotate-object::before {
+  position: absolute;
+  left: 35px;
+  top: 15px;
+  width: 2px;
+  height: 30px;
+  content: "";
+  background: #2f6fed;
+}
+
+.oc-rotate-object span {
+  position: absolute;
+  left: 29px;
+  top: 4px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 16px solid #2f6fed;
+}
+
+.oc-slider-row {
+  display: grid;
+  grid-template-columns: auto 1fr 46px;
+  gap: 10px;
+  align-items: center;
+  color: #637086;
+  font-size: 12px;
+}
+
+.oc-slider-row input {
+  width: 100%;
+  accent-color: #2f6fed;
+}
+
+.oc-slider-row output {
+  color: #172033;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.oc-turnstile-shell {
+  display: grid;
+  place-items: center;
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid #cbd5e3;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.oc-camera-wrap {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  border: 1px solid #cbd5e3;
+  border-radius: 6px;
+  background: #172033;
+  aspect-ratio: 3 / 2;
+}
+
+.oc-camera-wrap video,
+.oc-camera-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(-1);
+}
+
+.oc-camera-wrap video {
+  object-fit: cover;
+}
+
+.oc-camera-wrap canvas {
+  pointer-events: none;
+}
+
+.oc-camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #172033;
+  color: #dbe7ff;
+  font-size: 13px;
+}
+
+.oc-camera-placeholder[hidden] {
+  display: none;
+}
+
+.oc-action-sequence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.oc-action-chip {
+  padding: 7px 9px;
+  border: 1px solid #d7dee9;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #637086;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.oc-action-chip.is-current {
+  border-color: #2f6fed;
+  background: #eaf1ff;
+  color: #2f6fed;
+}
+
+.oc-action-chip.is-complete {
+  border-color: #9fc7ad;
+  background: #edf8f1;
+  color: #0f7b43;
+}
+
+.oc-speech-phrase {
+  max-height: 150px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #cbd5e3;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #35445c;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.oc-speech-phrase mark {
+  padding: 0 2px;
+  border-radius: 2px;
+  background: #dbe7ff;
+  color: #174ea6;
+  font-weight: 700;
+}
+
+.oc-speech-takes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.oc-speech-take {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid #d7dee9;
+  border-radius: 5px;
+  background: #ffffff;
+  font-size: 11px;
+}
+
+.oc-speech-take strong {
+  color: #7c8798;
+  font-size: 11px;
+}
+
+.oc-speech-take.is-recorded {
+  border-color: #9fc7ad;
+  background: #edf8f1;
+}
+
+.oc-speech-take.is-recorded strong {
+  color: #0f7b43;
+}
+
+.oc-speech-wave {
+  display: block;
+  width: 100%;
+  height: 72px;
+  border: 1px solid #d7dee9;
+  border-radius: 6px;
+  background: #edf2f8;
+}
+
 .oc-controls {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));

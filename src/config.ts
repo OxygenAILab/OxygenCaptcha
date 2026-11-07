@@ -41,6 +41,12 @@ function parseSites(value: string | undefined, nodeEnv: AppConfig["nodeEnv"]): S
         origins: ["*"],
         actions: ["submit"],
       },
+      {
+        key: "oc_public_demo",
+        secret: "oc_dev_secret_change_me",
+        origins: ["*"],
+        actions: ["submit"],
+      },
     ];
   }
 
@@ -71,11 +77,23 @@ function parseSeed(value: string | undefined): Buffer | undefined {
   return seed;
 }
 
+function parseDataKey(value: string | undefined): Buffer | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const key = Buffer.from(value, "base64");
+  if (key.length !== 32) {
+    throw new Error("OXY_PLATFORM_DATA_KEY_BASE64 must decode to exactly 32 bytes");
+  }
+  return key;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const rawNodeEnv = env.NODE_ENV ?? "development";
   const nodeEnv =
     rawNodeEnv === "production" || rawNodeEnv === "test" ? rawNodeEnv : "development";
   const seed = parseSeed(env.OXY_TOKEN_SEED_BASE64);
+  const platformDataKey = parseDataKey(env.OXY_PLATFORM_DATA_KEY_BASE64);
   if (nodeEnv === "production" && !seed) {
     throw new Error("OXY_TOKEN_SEED_BASE64 is required in production");
   }
@@ -91,5 +109,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rateLimitMax: integerFromEnv(env.RATE_LIMIT_MAX, 120, 10, 10_000),
     sites: parseSites(env.OXY_SITES_JSON, nodeEnv),
     ...(seed ? { tokenSeed: seed } : nodeEnv === "development" ? { tokenSeed: randomBytes(32) } : {}),
+    ...(env.TURNSTILE_SITE_KEY ? { turnstileSiteKey: env.TURNSTILE_SITE_KEY } : {}),
+    ...(env.TURNSTILE_SECRET_KEY ? { turnstileSecretKey: env.TURNSTILE_SECRET_KEY } : {}),
+    platformDataFile:
+      env.OXY_PLATFORM_DATA_FILE ??
+      (nodeEnv === "production"
+        ? "/opt/oxygenchallenge/data/platform.json"
+        : ".data/platform.json"),
+    ...(platformDataKey ? { platformDataKey } : {}),
+    ...(env.OXYGENACCOUNT_ISSUER
+      ? { oxygenAccountIssuer: env.OXYGENACCOUNT_ISSUER }
+      : {}),
+    ...(env.OXYGENACCOUNT_CLIENT_ID
+      ? { oxygenAccountClientId: env.OXYGENACCOUNT_CLIENT_ID }
+      : {}),
+    ...(env.OXYGENACCOUNT_CLIENT_SECRET
+      ? { oxygenAccountClientSecret: env.OXYGENACCOUNT_CLIENT_SECRET }
+      : {}),
   };
 }

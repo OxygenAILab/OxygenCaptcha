@@ -30,6 +30,7 @@ const testConfig: AppConfig = {
   maxAttempts: 3,
   rateLimitMax: 1000,
   tokenSeed: randomBytes(32),
+  platformDataFile: join(tmpdir(), `oxygenchallenge-platform-${randomBytes(8).toString("hex")}.json`),
   sites: [
     {
       key: "site_test",
@@ -166,7 +167,41 @@ describe("OxygenChallenge API", () => {
         },
       };
     }
+    if (state.type === "human_check" && state.humanCheck) {
+      return { answer: "human", dwellMs: state.humanCheck.minDwellMs };
+    }
+    if (state.type === "rotate_align") {
+      return { angle: 0 };
+    }
+    if (state.type === "semantic_pick" && state.semanticPick) {
+      return { answer: state.semanticPick.answer };
+    }
+    if (state.type === "hand_motion" && state.handMotion) {
+      return {
+        handGestures: state.handMotion.sequence.map((action) => ({
+          action,
+          durationMs: state.handMotion?.holdMs ?? 0,
+        })),
+      };
+    }
+    if (state.type === "speech_wave") {
+      return { audioTakes: syntheticSpeechTakes() };
+    }
     throw new Error(`No evidence helper for ${state.type}`);
+  }
+
+  function syntheticSpeechTakes(): number[][][] {
+    const take = (takeIndex: number) =>
+      Array.from({ length: 96 }, (_, frame) =>
+        Array.from({ length: 7 }, (_, band) => {
+          const signal = Math.sin(
+            frame * (0.07 + band * 0.013) + takeIndex * 1.7 + band * 0.9,
+          );
+          const jitter = ((((frame * 17 + band * 31 + takeIndex * 13) % 23) - 11) / 220);
+          return 0.5 + signal * 0.24 + jitter;
+        }),
+      );
+    return [1, 2, 3].map((index) => take(index));
   }
 
   it("creates an inverse-occlusion challenge with hidden decoy and path-only overlay", async () => {
@@ -242,7 +277,14 @@ describe("OxygenChallenge API", () => {
     expect(response.body).toContain('class="oc-decoy"');
     expect(response.body).toContain("/overlay.svg");
     expect(response.body).toContain("/frame.js");
-    expect(response.body).not.toMatch(/\b\d{6}\b(?![^<]*<\/span>)/);
+    const challengeId = response.body.match(/data-challenge-id="([^"]+)"/)?.[1];
+    const state = challengeId ? challenges.getForAsset(challengeId) : undefined;
+    expect(state?.visibleCode).toBeTruthy();
+    expect(response.body).not.toContain(state?.visibleCode);
+    const visibleSixDigit = [...response.body.matchAll(/\b\d{6}\b/g)].map(
+      (match) => match[0],
+    );
+    expect(visibleSixDigit).toContain(state?.decoyCode);
   });
 
   it("serves a WAV accessibility fallback", async () => {
@@ -506,7 +548,7 @@ describe("OxygenChallenge API", () => {
     }
   });
 
-  it("defaults multi-step sessions to three and keeps explicit types single-step", async () => {
+  it("uses the risk-derived step count and keeps explicit types single-step", async () => {
     const defaultSession = await app.inject({
       method: "POST",
       url: "/v1/challenges",
@@ -514,14 +556,12 @@ describe("OxygenChallenge API", () => {
       payload: { siteKey: "site_test", action: "submit" },
     });
     expect(defaultSession.statusCode).toBe(200);
-    expect(defaultSession.json()).toMatchObject({
-      risk: "low",
-      step: 1,
-      totalSteps: 3,
-    });
+    const session = defaultSession.json<{ risk: RiskLevel; step: number; totalSteps: number }>();
+    expect(session.step).toBe(1);
+    expect(session.totalSteps).toBe(RISK_STEPS[session.risk]);
 
     const explicit = await create("grid_select");
-    expect(explicit).toMatchObject({ risk: "low", step: 1, totalSteps: 1 });
+    expect(explicit).toMatchObject({ step: 1, totalSteps: 1 });
   });
 
   it("maps high and critical risk to six and eight steps", async () => {

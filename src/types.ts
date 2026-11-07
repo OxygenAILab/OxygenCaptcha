@@ -16,6 +16,13 @@ export type AppConfig = {
   rateLimitMax: number;
   sites: SiteConfig[];
   tokenSeed?: Buffer;
+  turnstileSiteKey?: string;
+  turnstileSecretKey?: string;
+  platformDataFile: string;
+  platformDataKey?: Buffer;
+  oxygenAccountIssuer?: string;
+  oxygenAccountClientId?: string;
+  oxygenAccountClientSecret?: string;
 };
 
 export type ChallengeType =
@@ -27,7 +34,13 @@ export type ChallengeType =
   | "key_pointer"
   | "pattern_memory"
   | "count_flash"
-  | "market_trade";
+  | "market_trade"
+  | "human_check"
+  | "rotate_align"
+  | "semantic_pick"
+  | "turnstile"
+  | "hand_motion"
+  | "speech_wave";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -81,11 +94,58 @@ export type MarketTradeState = {
   sellIndex: number;
 };
 
+export type HumanCheckState = {
+  minDwellMs: number;
+};
+
+export type RotateAlignState = {
+  initialAngle: number;
+  tolerance: number;
+};
+
+export type SemanticPickState = {
+  question: string;
+  options: Array<{ key: string; label: string }>;
+  answer: string;
+};
+
+export type TurnstileState = {
+  siteKey: string;
+};
+
+export type HandMotionAction = "open" | "fist" | "peace";
+
+export type HandMotionState = {
+  sequence: HandMotionAction[];
+  holdMs: number;
+};
+
+export type SpeechWaveState = {
+  phrase: string;
+  targetWords: string[];
+  focusWindows: Array<{
+    targetWord: string;
+    start: number;
+    end: number;
+  }>;
+  focusStart: number;
+  focusEnd: number;
+  takeCount: number;
+};
+
 export type ChallengeEvidence = {
   answer?: string;
   selectedIndices?: number[];
   holdMs?: number;
   distance?: number;
+  dwellMs?: number;
+  angle?: number;
+  turnstilePassed?: boolean;
+  handGestures?: Array<{
+    action: HandMotionAction;
+    durationMs: number;
+  }>;
+  audioTakes?: number[][][];
   market?: {
     buyIndex: number;
     sellIndex: number;
@@ -114,6 +174,12 @@ export type ChallengeState = {
   patternMemory?: PatternMemoryState;
   countFlash?: CountFlashState;
   marketTrade?: MarketTradeState;
+  humanCheck?: HumanCheckState;
+  rotateAlign?: RotateAlignState;
+  semanticPick?: SemanticPickState;
+  turnstile?: TurnstileState;
+  handMotion?: HandMotionState;
+  speechWave?: SpeechWaveState;
   sessionId?: string;
   stepIndex?: number;
   totalSteps?: number;

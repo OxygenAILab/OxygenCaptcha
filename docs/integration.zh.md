@@ -7,7 +7,10 @@
 ```js
 const response = await fetch("https://captcha.oxygenai.top/v1/siteverify", {
   method: "POST",
-  headers: { "content-type": "application/json" },
+  headers: {
+    "content-type": "application/json",
+    "x-oxygen-challenge-api-version": "1",
+  },
   body: JSON.stringify({
     secret: process.env.OXYGENCHALLENGE_SITE_SECRET,
     response: formData.get("oxygen-token"),
@@ -29,6 +32,7 @@ import requests
 
 response = requests.post(
     "https://captcha.oxygenai.top/v1/siteverify",
+    headers={"X-Oxygen-Challenge-API-Version": "1"},
     json={
         "secret": os.environ["OXYGENCHALLENGE_SITE_SECRET"],
         "response": token,

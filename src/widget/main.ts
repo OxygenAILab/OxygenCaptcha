@@ -53,7 +53,7 @@ class OxygenChallengeElement extends HTMLElement {
     this.frame.title = "OxygenChallenge verification";
     this.frame.loading = "lazy";
     this.frame.referrerPolicy = "strict-origin-when-cross-origin";
-    this.frame.allow = "autoplay";
+    this.frame.allow = "autoplay; camera; microphone";
     this.frame.src = this.frameSource();
     shadow.append(this.frame);
     window.addEventListener("message", this.onMessage);

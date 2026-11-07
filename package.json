@@ -1,6 +1,6 @@
 {
   "name": "oxygenchallenge",
-  "version": "26.0.0-alpha.3",
+  "version": "26.0.0-alpha.4",
   "private": true,
   "type": "module",
   "description": "Risk-aware CAPTCHA API and embeddable challenge widget for captcha.oxygenai.top",

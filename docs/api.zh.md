@@ -1,12 +1,14 @@
 # OxygenChallenge API
 
-版本：`26.0.0-alpha.3`
+版本：`26.0.0-alpha.4`
 
 ## 先决条件
 
 - 请求源必须在站点 `origins` 白名单中。
 - `POST /v1/challenges` 需要浏览器 `Origin` 或 `Referer`。
 - `POST /v1/siteverify` 只允许客户服务端调用，必须使用站点 secret。
+- 客户端可以选择发送 `X-Oxygen-Challenge-API-Version: 1`；发送不兼容版本时返回
+  `400 API_VERSION_MISMATCH`。所有 `/v1/**` 响应都会回传同一版本头。
 - 所有 Challenge 和令牌均为一次性；资源 URL 不应被代理缓存。
 
 ## 创建 Challenge
@@ -45,6 +47,12 @@
 | `pattern_memory` | 观察并重复闪烁图标序列 |
 | `count_flash` | 记住短暂显示的圆点数量 |
 | `market_trade` | 在曲线低点买入、高点卖出 |
+| `human_check` | 点击“我不是机器人”并满足最短交互停留 |
+| `rotate_align` | 将图形旋转回正方向 |
+| `semantic_pick` | 选择符合问题的语义选项 |
+| `turnstile` | 完成 Cloudflare Turnstile |
+| `hand_motion` | 按顺序完成 WebCam 动态手势 |
+| `speech_wave` | 多遍朗读并比较目标字词窗口 |
 
 `accessible: true` 会强制使用 `inverse_occlusion`，并提供 DTMF 音频替代。
 
@@ -187,6 +195,83 @@
 }
 ```
 
+### 基础确认与方向校准
+
+```json
+{
+  "type": "human_check",
+  "humanCheck": { "minDwellMs": 820 }
+}
+```
+
+```json
+{
+  "type": "rotate_align",
+  "rotateAlign": {
+    "initialAngle": -93,
+    "tolerance": 6
+  }
+}
+```
+
+### 语义选择与 Cloudflare Turnstile
+
+```json
+{
+  "type": "semantic_pick",
+  "prompt": "哪一个是会飞的动物？",
+  "options": [
+    { "key": "cat", "label": "猫" },
+    { "key": "bird", "label": "鸟" }
+  ]
+}
+```
+
+```json
+{
+  "type": "turnstile",
+  "turnstileSiteKey": "0x..."
+}
+```
+
+Turnstile 的生产 secret 只保存在服务端；浏览器只拿到 site key。验证结果通过
+Cloudflare `siteverify` 在服务端确认。
+
+### 手部动态动作
+
+```json
+{
+  "type": "hand_motion",
+  "handMotion": {
+    "sequence": ["open", "peace", "fist"],
+    "holdMs": 450
+  }
+}
+```
+
+摄像头帧在设备本地交给 MediaPipe Hand Landmarker，客户端只提交动作标签与保持时长，
+不向服务端上传原始画面。
+
+### 朗读声学一致性
+
+```json
+{
+  "type": "speech_wave",
+  "speechWave": {
+    "phrase": "I like apples, apples are good for our health.",
+    "targetWords": ["apples"],
+    "focusWindows": [
+      { "targetWord": "apples", "start": 0.16, "end": 0.34 }
+    ],
+    "takeCount": 3
+  }
+}
+```
+
+中文模板会逐项下发 `李光头`、`宋钢`、`笑`、`哭`、`一声`、`门板` 等
+`focusWindows`。客户端只提交每遍的频段/能量特征；服务端按窗口做 DTW 比较，
+要求三遍存在自然差异且整体保持同一语音内容，拒绝完全相同的波形。
+
 ## 提交答案
 
 `POST /v1/challenges/:id/verify`
@@ -248,6 +333,43 @@
   }
 }
 ```
+
+基础检查、方向、Turnstile 与媒体证据：
+
+```json
+{
+  "answer": "human",
+  "dwellMs": 900
+}
+```
+
+```json
+{ "angle": 0 }
+```
+
+```json
+{ "turnstileToken": "<cloudflare response token>" }
+```
+
+```json
+{
+  "handGestures": [
+    { "action": "open", "durationMs": 520 },
+    { "action": "peace", "durationMs": 610 }
+  ]
+}
+```
+
+```json
+{
+  "audioTakes": [
+    [[0.12, 0.31, 0.55]],
+    [[0.13, 0.29, 0.58]]
+  ]
+}
+```
+
+上例只展示结构；实际提交每遍至少 20 帧、每帧至少 5 个频段/能量特征，最多 160 帧、8 维。
 
 成功：
 

@@ -1,5 +1,6 @@
 import { randomBytes, randomInt } from "node:crypto";
 import type { AnimalSound } from "./audio.js";
+import { validHandMotion } from "./gestures.js";
 import { createGrid } from "./grid.js";
 import {
   createCountFlash,
@@ -10,6 +11,7 @@ import {
   validPatternSelection,
 } from "./microgames.js";
 import { createMotion, validMotionPoint } from "./motion.js";
+import { createSpeechWave, SPEECH_TEMPLATES, speechTakesValid } from "./speech.js";
 import type {
   AppConfig,
   AudioSequenceState,
@@ -19,6 +21,7 @@ import type {
   ChallengeSessionState,
   ChallengeState,
   ChallengeType,
+  HandMotionAction,
   RiskLevel,
 } from "./types.js";
 import type { TokenService } from "./token.js";
@@ -38,6 +41,41 @@ const AUDIO_ANIMALS: Array<{ key: AnimalSound; label: string }> = [
   { key: "bird", label: "鸟" },
 ];
 
+const SEMANTIC_QUESTIONS = [
+  {
+    question: "哪一个是会飞的动物？",
+    options: [
+      { key: "cat", label: "猫" },
+      { key: "bird", label: "鸟" },
+      { key: "fish", label: "鱼" },
+      { key: "dog", label: "狗" },
+    ],
+    answer: "bird",
+  },
+  {
+    question: "哪一个是水果？",
+    options: [
+      { key: "carrot", label: "胡萝卜" },
+      { key: "apple", label: "苹果" },
+      { key: "rice", label: "米饭" },
+      { key: "bread", label: "面包" },
+    ],
+    answer: "apple",
+  },
+  {
+    question: "2 + 3 等于多少？",
+    options: [
+      { key: "4", label: "4" },
+      { key: "5", label: "5" },
+      { key: "6", label: "6" },
+      { key: "7", label: "7" },
+    ],
+    answer: "5",
+  },
+] as const;
+
+const HAND_ACTIONS: HandMotionAction[] = ["open", "fist", "peace"];
+
 const CHALLENGE_TYPES: ChallengeType[] = [
   "grid_select",
   "inverse_occlusion",
@@ -48,6 +86,12 @@ const CHALLENGE_TYPES: ChallengeType[] = [
   "pattern_memory",
   "count_flash",
   "market_trade",
+  "human_check",
+  "rotate_align",
+  "semantic_pick",
+  "turnstile",
+  "hand_motion",
+  "speech_wave",
 ];
 
 export const RISK_STEPS: Record<RiskLevel, number> = {
@@ -97,13 +141,17 @@ function shuffle<T>(values: T[]): T[] {
   return values;
 }
 
-function chooseTypes(count: number, requestedType?: ChallengeType): ChallengeType[] {
+function chooseTypes(
+  count: number,
+  pool: ChallengeType[],
+  requestedType?: ChallengeType,
+): ChallengeType[] {
   if (requestedType) {
     return [requestedType];
   }
   const result: ChallengeType[] = [];
   while (result.length < count) {
-    const batch = shuffle([...CHALLENGE_TYPES]);
+    const batch = shuffle([...pool]);
     for (const type of batch) {
       if (result[result.length - 1] === type && batch.length > 1) {
         continue;
@@ -170,7 +218,11 @@ export class ChallengeStore {
     const sessionId = randomBytes(18).toString("base64url");
     const now = Date.now();
     const expiresAt = now + this.config.challengeTtlSeconds * 1000;
-    const types = chooseTypes(totalSteps, accessible ? "inverse_occlusion" : requestedType);
+    const types = chooseTypes(
+      totalSteps,
+      this.availableTypes(),
+      accessible ? "inverse_occlusion" : requestedType,
+    );
     const session: ChallengeSessionState = {
       id: sessionId,
       siteKey,
@@ -347,6 +399,38 @@ export class ChallengeStore {
       if (!passed) {
         failure = { verified: false, code: "INVALID_POINT" };
       }
+    } else if (state.type === "human_check") {
+      passed = Boolean(
+        state.humanCheck &&
+          evidence.answer === "human" &&
+          typeof evidence.dwellMs === "number" &&
+          evidence.dwellMs >= state.humanCheck.minDwellMs,
+      );
+    } else if (state.type === "rotate_align") {
+      const normalized = ((evidence.angle ?? 999) + 180) % 360 - 180;
+      passed = Boolean(
+        state.rotateAlign && Math.abs(normalized) <= state.rotateAlign.tolerance,
+      );
+      if (!passed) {
+        failure = { verified: false, code: "INVALID_POINT" };
+      }
+    } else if (state.type === "semantic_pick") {
+      passed = Boolean(
+        state.semanticPick && evidence.answer === state.semanticPick.answer,
+      );
+    } else if (state.type === "turnstile") {
+      passed = Boolean(state.turnstile && evidence.turnstilePassed);
+    } else if (state.type === "hand_motion") {
+      passed = Boolean(
+        state.handMotion && validHandMotion(state.handMotion, evidence.handGestures),
+      );
+      if (!passed) {
+        failure = { verified: false, code: "INVALID_GESTURE" };
+      }
+    } else if (state.type === "speech_wave") {
+      passed = Boolean(
+        state.speechWave && speechTakesValid(state.speechWave, evidence.audioTakes),
+      );
     } else {
       passed = Boolean(
         state.keyPointer &&
@@ -383,6 +467,14 @@ export class ChallengeStore {
 
   size(): number {
     return this.challenges.size;
+  }
+
+  private availableTypes(): ChallengeType[] {
+    return CHALLENGE_TYPES.filter(
+      (type) =>
+        type !== "turnstile" ||
+        Boolean(this.config.turnstileSiteKey && this.config.turnstileSecretKey),
+    );
   }
 
   private createState(input: {
@@ -462,6 +554,66 @@ export class ChallengeStore {
       return {
         ...common,
         marketTrade: createMarketTrade(randomInt(1, 2_147_483_647)),
+      };
+    }
+    if (input.type === "human_check") {
+      return {
+        ...common,
+        humanCheck: { minDwellMs: randomInt(650, 1_200) },
+      };
+    }
+    if (input.type === "rotate_align") {
+      let initialAngle = randomInt(-160, 161);
+      if (Math.abs(initialAngle) < 25) {
+        initialAngle += initialAngle < 0 ? -40 : 40;
+      }
+      return {
+        ...common,
+        rotateAlign: {
+          initialAngle,
+          tolerance: 6,
+        },
+      };
+    }
+    if (input.type === "semantic_pick") {
+      const semantic =
+        SEMANTIC_QUESTIONS[randomInt(0, SEMANTIC_QUESTIONS.length)] ??
+        SEMANTIC_QUESTIONS[0];
+      return {
+        ...common,
+        semanticPick: {
+          question: semantic.question,
+          options: semantic.options.map((option) => ({ ...option })),
+          answer: semantic.answer,
+        },
+      };
+    }
+    if (input.type === "turnstile") {
+      return {
+        ...common,
+        turnstile: {
+          siteKey: this.config.turnstileSiteKey ?? "",
+        },
+      };
+    }
+    if (input.type === "hand_motion") {
+      const sequenceLength = randomInt(2, 4);
+      const sequence = shuffle([...HAND_ACTIONS]).slice(0, sequenceLength);
+      return {
+        ...common,
+        handMotion: {
+          sequence,
+          holdMs: 450,
+        },
+      };
+    }
+    if (input.type === "speech_wave") {
+      const template =
+        SPEECH_TEMPLATES[randomInt(0, SPEECH_TEMPLATES.length)] ??
+        SPEECH_TEMPLATES[0];
+      return {
+        ...common,
+        speechWave: createSpeechWave(template as (typeof SPEECH_TEMPLATES)[number]),
       };
     }
     return {

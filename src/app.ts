@@ -3,6 +3,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -10,6 +11,9 @@ import { renderAnimalSequenceWave, renderDtmfWave } from "./audio.js";
 import { ChallengeStore, RISK_STEPS, type VerificationResult } from "./challenge.js";
 import { loadConfig } from "./config.js";
 import { renderGridItemSvg, renderTargetSvg } from "./grid.js";
+import { registerPlatform } from "./platform.js";
+import { PlatformStore } from "./platform-store.js";
+import { clientIp, RiskTracker } from "./risk.js";
 import { renderChallengeSvg } from "./render.js";
 import {
   getSite,
@@ -20,6 +24,8 @@ import {
 } from "./site.js";
 import { TokenService } from "./token.js";
 import type { AppConfig, ChallengeState } from "./types.js";
+import { officialSiteHtml } from "./web.js";
+import { verifyTurnstile } from "./turnstile.js";
 
 const CHALLENGE_TYPES = [
   "inverse_occlusion",
@@ -31,16 +37,23 @@ const CHALLENGE_TYPES = [
   "pattern_memory",
   "count_flash",
   "market_trade",
+  "human_check",
+  "rotate_align",
+  "semantic_pick",
+  "turnstile",
+  "hand_motion",
+  "speech_wave",
 ] as const;
 
 const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
+const API_VERSION = "1";
 
 const createSchema = z.object({
   siteKey: z.string().min(3).max(128),
   action: z.string().min(1).max(64).default("submit"),
   accessible: z.boolean().default(false),
   challengeType: z.enum(CHALLENGE_TYPES).optional(),
-  risk: z.enum(RISK_LEVELS).default("low"),
+  risk: z.enum(RISK_LEVELS).optional(),
   steps: z.number().int().min(1).max(8).optional(),
 });
 
@@ -54,6 +67,22 @@ const verifySchema = z.object({
       buyIndex: z.number().int().min(0).max(200),
       sellIndex: z.number().int().min(0).max(200),
     })
+    .optional(),
+  dwellMs: z.number().int().min(0).max(10_000).optional(),
+  angle: z.number().min(-180).max(180).optional(),
+  turnstileToken: z.string().max(2_048).optional(),
+  handGestures: z
+    .array(
+      z.object({
+        action: z.enum(["open", "fist", "peace"]),
+        durationMs: z.number().int().min(0).max(5_000),
+      }),
+    )
+    .max(4)
+    .optional(),
+  audioTakes: z
+    .array(z.array(z.array(z.number().min(-8).max(8)).max(8)).max(160))
+    .max(3)
     .optional(),
   point: z
     .object({
@@ -70,7 +99,7 @@ const embedSchema = z.object({
   action: z.string().min(1).max(64).default("submit"),
   parentOrigin: z.string().url().optional(),
   challengeType: z.enum(CHALLENGE_TYPES).optional(),
-  risk: z.enum(RISK_LEVELS).default("low"),
+  risk: z.enum(RISK_LEVELS).optional(),
   steps: z.coerce.number().int().min(1).max(8).optional(),
   accessible: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   test: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
@@ -91,6 +120,28 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function apiVersionAllowed(request: FastifyRequest): boolean {
+  const requested = request.headers["x-oxygen-challenge-api-version"];
+  return requested === undefined || requested === API_VERSION || requested === `v${API_VERSION}`;
+}
+
+function highlightedText(value: string, targets: string[]): string {
+  if (targets.length === 0) {
+    return escapeHtml(value);
+  }
+  const escapedTargets = targets
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+    .map((target) => target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`(${escapedTargets.join("|")})`, "g");
+  return value
+    .split(pattern)
+    .map((part) =>
+      targets.includes(part) ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part),
+    )
+    .join("");
 }
 
 function apiBase(config: AppConfig): string {
@@ -201,6 +252,65 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
         seed: state.marketTrade.seed,
         width: state.marketTrade.width,
         height: state.marketTrade.height,
+      },
+    };
+  }
+
+  if (state.type === "human_check" && state.humanCheck) {
+    return {
+      ...common,
+      prompt: "确认你不是自动程序",
+      minDwellMs: state.humanCheck.minDwellMs,
+    };
+  }
+
+  if (state.type === "rotate_align" && state.rotateAlign) {
+    return {
+      ...common,
+      prompt: "旋转图形，使其回到正方向",
+      initialAngle: state.rotateAlign.initialAngle,
+      tolerance: state.rotateAlign.tolerance,
+    };
+  }
+
+  if (state.type === "semantic_pick" && state.semanticPick) {
+    return {
+      ...common,
+      prompt: state.semanticPick.question,
+      options: state.semanticPick.options,
+    };
+  }
+
+  if (state.type === "turnstile" && state.turnstile) {
+    return {
+      ...common,
+      prompt: "完成 Cloudflare 人机验证",
+      turnstileSiteKey: state.turnstile.siteKey,
+    };
+  }
+
+  if (state.type === "hand_motion" && state.handMotion) {
+    return {
+      ...common,
+      prompt: "按顺序完成动态手势",
+      handMotion: {
+        sequence: state.handMotion.sequence,
+        holdMs: state.handMotion.holdMs,
+      },
+    };
+  }
+
+  if (state.type === "speech_wave" && state.speechWave) {
+    return {
+      ...common,
+      prompt: "朗读三遍，重点比较高亮词的声学一致性",
+      speechWave: {
+        phrase: state.speechWave.phrase,
+        targetWords: state.speechWave.targetWords,
+        focusWindows: state.speechWave.focusWindows,
+        focusStart: state.speechWave.focusStart,
+        focusEnd: state.speechWave.focusEnd,
+        takeCount: state.speechWave.takeCount,
       },
     };
   }
@@ -409,6 +519,154 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
       </div>`;
   }
 
+  if (state.type === "human_check" && state.humanCheck) {
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">基础验证</p>
+          <p class="oc-prompt" id="oc-prompt">确认你不是自动程序</p>
+        </div>
+        <span class="oc-difficulty">基础</span>
+      </div>
+      <label class="oc-human-check" id="oc-human-check" data-min-dwell="${state.humanCheck.minDwellMs}">
+        <input id="oc-human-input" type="checkbox">
+        <span class="oc-human-box" aria-hidden="true"></span>
+        <span class="oc-human-copy">
+          <strong>我不是机器人</strong>
+          <small>点击后完成本地交互检查</small>
+        </span>
+      </label>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
+      </div>`;
+  }
+
+  if (state.type === "rotate_align" && state.rotateAlign) {
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">方向校准</p>
+          <p class="oc-prompt" id="oc-prompt">旋转图形，使其回到正方向</p>
+        </div>
+        <span class="oc-difficulty">基础</span>
+      </div>
+      <div class="oc-rotate-stage">
+        <div class="oc-rotate-object" id="oc-rotate-object" style="transform:rotate(${state.rotateAlign.initialAngle}deg)">
+          <span></span>
+        </div>
+      </div>
+      <label class="oc-slider-row" for="oc-rotate-slider">
+        <span>旋转角度</span>
+        <input id="oc-rotate-slider" type="range" min="-180" max="180" step="1" value="${state.rotateAlign.initialAngle}">
+        <output id="oc-rotate-value">${state.rotateAlign.initialAngle}°</output>
+      </label>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit">验证</button>
+      </div>`;
+  }
+
+  if (state.type === "semantic_pick" && state.semanticPick) {
+    const options = state.semanticPick.options
+      .map(
+        (option) => `
+          <button class="oc-choice oc-semantic-choice" type="button" data-choice="${escapeHtml(option.key)}" aria-pressed="false">
+            <span class="oc-choice-label">${escapeHtml(option.label)}</span>
+            <span class="oc-choice-check" aria-hidden="true"></span>
+          </button>`,
+      )
+      .join("");
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">基础判断</p>
+          <p class="oc-prompt" id="oc-prompt">${escapeHtml(state.semanticPick.question)}</p>
+        </div>
+        <span class="oc-difficulty">基础</span>
+      </div>
+      <div class="oc-choice-grid oc-choice-grid-four" id="oc-choices" role="group" aria-labelledby="oc-prompt">${options}</div>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
+      </div>`;
+  }
+
+  if (state.type === "turnstile" && state.turnstile) {
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">Cloudflare 安全验证</p>
+          <p class="oc-prompt" id="oc-prompt">完成人机验证后继续</p>
+        </div>
+        <span class="oc-difficulty">Turnstile</span>
+      </div>
+      <div class="oc-turnstile-shell">
+        <div id="oc-turnstile" data-sitekey="${escapeHtml(state.turnstile.siteKey)}" data-language="zh-CN"></div>
+      </div>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>继续</button>
+      </div>`;
+  }
+
+  if (state.type === "hand_motion" && state.handMotion) {
+    const sequence = state.handMotion.sequence
+      .map(
+        (action, index) =>
+          `<span class="oc-action-chip" data-action="${escapeHtml(action)}">${index + 1}. ${action === "open" ? "张开手掌" : action === "fist" ? "握拳" : "剪刀手"}</span>`,
+      )
+      .join("");
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">摄像头动态验证</p>
+          <p class="oc-prompt" id="oc-prompt">按顺序完成动作，每个动作保持片刻</p>
+        </div>
+        <span class="oc-difficulty">WebCam</span>
+      </div>
+      <div class="oc-camera-wrap">
+        <video id="oc-hand-video" playsinline muted></video>
+        <canvas id="oc-hand-overlay" width="360" height="240"></canvas>
+        <div class="oc-camera-placeholder" id="oc-camera-placeholder">摄像头未启用</div>
+      </div>
+      <div class="oc-action-sequence" id="oc-action-sequence" data-sequence="${escapeHtml(state.handMotion.sequence.join(","))}" data-hold="${state.handMotion.holdMs}">${sequence}</div>
+      <button class="oc-media-button" id="oc-hand-start" type="button">
+        <span class="oc-media-icon" aria-hidden="true"></span>
+        <span>启用摄像头并开始</span>
+      </button>
+      <p class="oc-helper" id="oc-hand-help">视频帧只在设备本地处理，不上传原始画面。</p>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
+      </div>`;
+  }
+
+  if (state.type === "speech_wave" && state.speechWave) {
+    const takes = Array.from(
+      { length: state.speechWave.takeCount },
+      (_, index) =>
+        `<div class="oc-speech-take" data-take="${index}"><span>第 ${index + 1} 遍</span><strong>未录制</strong></div>`,
+    ).join("");
+    return `
+      <div class="oc-prompt-row">
+        <div>
+          <p class="oc-kicker">麦克风声学验证</p>
+          <p class="oc-prompt" id="oc-prompt">完整朗读三遍，比较高亮词的声学一致性</p>
+        </div>
+        <span class="oc-difficulty">${state.speechWave.takeCount} 遍</span>
+      </div>
+      <div class="oc-speech-phrase" id="oc-speech-phrase"
+           data-take-count="${state.speechWave.takeCount}"
+           data-focus-start="${state.speechWave.focusStart}"
+           data-focus-end="${state.speechWave.focusEnd}">${highlightedText(state.speechWave.phrase, state.speechWave.targetWords)}</div>
+      <div class="oc-speech-takes" id="oc-speech-takes">${takes}</div>
+      <canvas class="oc-speech-wave" id="oc-speech-wave" width="360" height="72" aria-label="麦克风波形"></canvas>
+      <button class="oc-media-button" id="oc-speech-record" type="button">
+        <span class="oc-media-icon" aria-hidden="true"></span>
+        <span>录制第 1 遍</span>
+      </button>
+      <p class="oc-helper" id="oc-speech-help">原始音频不离开设备，只提交频段特征。</p>
+      <div class="oc-controls oc-controls-end">
+        <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
+      </div>`;
+  }
+
   const backgroundColor = escapeHtml(state.backgroundColor ?? "#172033");
   const inverseColor = escapeHtml(state.inverseColor ?? "#f4e0cc");
   return `
@@ -442,6 +700,7 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>OxygenChallenge</title>
   <link rel="stylesheet" href="${escapeHtml(apiBase(config))}/widget.css">
+  ${state.type === "turnstile" ? '<script defer src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>' : ""}
   <script defer src="${escapeHtml(apiBase(config))}/frame.js"></script>
 </head>
 <body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}">
@@ -484,6 +743,11 @@ export type BuildAppOptions = {
   config?: AppConfig;
   publicDir?: string;
   logger?: boolean;
+  turnstileVerifier?: (
+    secret: string,
+    token: string,
+    remoteIp?: string,
+  ) => Promise<{ success: boolean; errorCodes: string[] }>;
 };
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<{
@@ -491,13 +755,33 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   config: AppConfig;
   challenges: ChallengeStore;
   tokens: TokenService;
+  platformStore: PlatformStore;
 }> {
   const config = options.config ?? loadConfig();
   const tokens = new TokenService(config.publicOrigin, config.tokenTtlSeconds, config.tokenSeed);
+  if (
+    config.nodeEnv === "production" &&
+    config.oxygenAccountClientId &&
+    !config.platformDataKey
+  ) {
+    throw new Error("OXY_PLATFORM_DATA_KEY_BASE64 is required for the open platform");
+  }
+  const platformKey =
+    config.platformDataKey ??
+    createHash("sha256")
+      .update(config.tokenSeed ?? Buffer.from(config.publicOrigin))
+      .digest();
+  const platformStore = new PlatformStore(config.platformDataFile, platformKey, config.sites);
+  await platformStore.load();
   const challenges = new ChallengeStore(config, tokens);
+  const riskTracker = new RiskTracker();
+  const verifyTurnstileToken =
+    options.turnstileVerifier ??
+    ((secret: string, token: string, remoteIp?: string) =>
+      verifyTurnstile(secret, token, remoteIp));
   const app = Fastify({
     logger: options.logger === false ? false : { level: process.env.LOG_LEVEL ?? "info" },
-    bodyLimit: 16 * 1024,
+    bodyLimit: 64 * 1024,
     trustProxy: true,
   });
 
@@ -505,11 +789,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     contentSecurityPolicy: {
       directives: {
         "default-src": ["'none'"],
-        "script-src": ["'self'"],
+        "script-src": ["'self'", "https://challenges.cloudflare.com"],
         "style-src": ["'self'", "'unsafe-inline'"],
-        "img-src": ["'self'", "data:"],
-        "media-src": ["'self'"],
-        "connect-src": ["'self'"],
+        "img-src": ["'self'", "data:", "blob:"],
+        "media-src": ["'self'", "blob:"],
+        "connect-src": ["'self'", "https://challenges.cloudflare.com"],
+        "frame-src": ["'self'", "https://challenges.cloudflare.com"],
+        "worker-src": ["'self'", "blob:"],
         "frame-ancestors": ["*"],
         "base-uri": ["'none'"],
         "form-action": ["'self'"],
@@ -543,6 +829,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   }
 
   app.addHook("onSend", async (request, reply, payload) => {
+    if (request.url.startsWith("/v1/")) {
+      reply.header("X-Oxygen-Challenge-API-Version", API_VERSION);
+    }
     if (["/widget.js", "/widget.css", "/frame.js"].includes(request.url)) {
       reply.header("Cross-Origin-Resource-Policy", "cross-origin");
       reply.header("Access-Control-Allow-Origin", "*");
@@ -556,11 +845,21 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   });
 
   app.get("/", async (_request, reply) => {
-    reply.type("application/json");
-    return {
+    reply
+      .type("text/html; charset=utf-8")
+      .header("Cache-Control", "public, max-age=60")
+      .header(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      );
+    return reply.send(officialSiteHtml(config));
+  });
+
+  app.get("/v1/meta", async () => ({
       name: "OxygenChallenge",
-      version: "v26.0-alpha.3",
-      mode: "api-only",
+      version: "v26.0-alpha.4",
+      apiVersion: API_VERSION,
+      mode: "api-and-open-platform",
       challengeTypes: CHALLENGE_TYPES,
       riskLevels: RISK_STEPS,
       endpoints: {
@@ -571,7 +870,36 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         jwks: "/.well-known/oxygenchallenge/jwks.json",
         health: "/healthz",
       },
-    };
+  }));
+
+  app.get("/captcha", async (request, reply) => {
+    const site = config.sites[0];
+    if (!site) {
+      return reply.code(503).type("text/html").send(errorPage(503, "验证服务尚未配置"));
+    }
+    const risk = riskTracker.assess(
+      { headers: request.headers, ip: request.ip },
+      config.nodeEnv === "production",
+    );
+    const state = challenges.create(
+      site.key,
+      "submit",
+      config.publicOrigin,
+      false,
+      undefined,
+      risk.level,
+      undefined,
+      config.nodeEnv !== "production",
+    );
+    reply
+      .type("text/html; charset=utf-8")
+      .header("Cache-Control", "no-store")
+      .header("X-Robots-Tag", "noindex, nofollow")
+      .header("Content-Security-Policy", "default-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
+      .header("Permissions-Policy", "camera=(self), microphone=(self)");
+    return reply.send(
+      embedHtml(state, config, config.nodeEnv !== "production"),
+    );
   });
 
   app.get("/healthz", async () => ({
@@ -605,6 +933,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   app.get("/.well-known/oxygenchallenge/jwks.json", async () => tokens.jwks());
 
   app.post("/v1/challenges", async (request, reply) => {
+    if (!apiVersionAllowed(request)) {
+      return reply.code(400).send({ error: "API_VERSION_MISMATCH" });
+    }
     const parsed = createSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "INVALID_REQUEST", issues: parsed.error.issues });
@@ -622,6 +953,32 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (!siteAllowsOrigin(site, origin)) {
       return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
     }
+    if (
+      parsed.data.challengeType === "turnstile" &&
+      (!config.turnstileSiteKey || !config.turnstileSecretKey)
+    ) {
+      return reply.code(400).send({ error: "TURNSTILE_NOT_CONFIGURED" });
+    }
+
+    const risk = riskTracker.assess(
+      { headers: request.headers, ip: request.ip },
+      config.nodeEnv === "production",
+      parsed.data.risk,
+    );
+    request.log.info(
+      {
+        event: "risk.assessed",
+        score: risk.score,
+        level: risk.level,
+        reasons: risk.reasons,
+        ip: risk.ip,
+        country: risk.country,
+        platform: risk.platform,
+        system: risk.system,
+        siteKey: parsed.data.siteKey,
+      },
+      "risk assessed",
+    );
 
     const state = challenges.create(
       parsed.data.siteKey,
@@ -629,7 +986,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       origin,
       parsed.data.accessible,
       parsed.data.challengeType,
-      parsed.data.risk,
+      risk.level,
       parsed.data.steps,
     );
 
@@ -648,12 +1005,41 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       return reply.code(404).send({ verified: false, code: "CHALLENGE_NOT_FOUND" });
     }
 
+    let turnstilePassed = false;
+    if (
+      state.type === "turnstile" &&
+      parsed.data.turnstileToken &&
+      config.turnstileSecretKey
+    ) {
+      const turnstile = await verifyTurnstileToken(
+        config.turnstileSecretKey,
+        parsed.data.turnstileToken,
+        clientIp({ headers: request.headers, ip: request.ip }),
+      );
+      turnstilePassed = turnstile.success;
+      if (!turnstile.success) {
+        request.log.warn(
+          {
+            event: "turnstile.failed",
+            challengeId: state.id,
+            errorCodes: turnstile.errorCodes,
+          },
+          "turnstile verification failed",
+        );
+      }
+    }
+
     const result = challenges.verify(state.id, {
       ...(parsed.data.answer ? { answer: parsed.data.answer } : {}),
       ...(parsed.data.selectedIndices ? { selectedIndices: parsed.data.selectedIndices } : {}),
       ...(parsed.data.holdMs !== undefined ? { holdMs: parsed.data.holdMs } : {}),
       ...(parsed.data.distance !== undefined ? { distance: parsed.data.distance } : {}),
       ...(parsed.data.market ? { market: parsed.data.market } : {}),
+      ...(parsed.data.dwellMs !== undefined ? { dwellMs: parsed.data.dwellMs } : {}),
+      ...(parsed.data.angle !== undefined ? { angle: parsed.data.angle } : {}),
+      ...(parsed.data.handGestures ? { handGestures: parsed.data.handGestures } : {}),
+      ...(parsed.data.audioTakes ? { audioTakes: parsed.data.audioTakes } : {}),
+      ...(state.type === "turnstile" ? { turnstilePassed } : {}),
       ...(parsed.data.point ? { point: parsed.data.point } : {}),
     });
     logVerification(request, state, result);
@@ -806,6 +1192,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       if (!siteAllowsOrigin(site, parentOrigin)) {
         return reply.code(403).type("text/html").send(errorPage(403, "嵌入来源未授权"));
       }
+      if (
+        parsed.data.challengeType === "turnstile" &&
+        (!config.turnstileSiteKey || !config.turnstileSecretKey)
+      ) {
+        return reply.code(400).type("text/html").send(errorPage(400, "Turnstile 尚未配置"));
+      }
+      const risk = riskTracker.assess(
+        { headers: request.headers, ip: request.ip },
+        config.nodeEnv === "production",
+        parsed.data.risk,
+      );
 
       state = challenges.create(
         siteKey,
@@ -813,7 +1210,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         parentOrigin,
         parsed.data.accessible,
         parsed.data.challengeType,
-        parsed.data.risk,
+        risk.level,
         parsed.data.steps,
         testMode,
       );
@@ -825,11 +1222,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       .type("text/html; charset=utf-8")
       .header("Cache-Control", "no-store")
       .header("X-Robots-Tag", "noindex, nofollow")
-      .header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'self'");
+      .header("Content-Security-Policy", "default-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; frame-ancestors *; base-uri 'none'; form-action 'self'")
+      .header("Permissions-Policy", "camera=(self), microphone=(self)");
     return reply.send(embedHtml(state, config, testMode));
   });
 
   app.post("/v1/siteverify", async (request, reply) => {
+    if (!apiVersionAllowed(request)) {
+      return reply.code(400).send({ error: "API_VERSION_MISMATCH" });
+    }
     const parsed = siteverifySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ success: false, errorCodes: ["INVALID_REQUEST"] });
@@ -863,7 +1264,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     };
   });
 
-  return { app, config, challenges, tokens };
+  await registerPlatform(app, config, platformStore);
+
+  return { app, config, challenges, tokens, platformStore };
 }
 
 function findState(challenges: ChallengeStore, request: FastifyRequest): ChallengeState | undefined {

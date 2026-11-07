@@ -62,6 +62,12 @@
 - `pattern_memory`
 - `count_flash`
 - `market_trade`
+- `human_check`
+- `rotate_align`
+- `semantic_pick`
+- `turnstile`
+- `hand_motion`
+- `speech_wave`
 
 显式 `challenge-type` 会固定为单题会话。风险会话在 iframe 内逐步推进，进度显示在卡片底部。
 
@@ -145,9 +151,12 @@ frame-src https://captcha.oxygenai.top
 - 市场题使用低点买入、高点卖出的曲线点击交互。
 - 动态题和双输入题尊重 `prefers-reduced-motion`；系统要求减少动态效果时仍可通过
   `accessible` 切换到静态替代。
-
-本版本不请求麦克风或摄像头权限。主动说话验证和动态手势验证需要在后续版本中增加明确
-授权、数据处理声明和防重放设计。
+- `hand_motion` 只有在用户点击“启用摄像头并开始”后请求摄像头权限，视频帧在设备本地
+  完成 MediaPipe 手部骨骼识别，只提交动作标签和持续时间。
+- `speech_wave` 只有在用户点击录制后请求麦克风权限，三遍朗读只提交频段与能量特征；
+  原始音频不上传，服务端比较所有目标字词窗口的非严格一致性。
+- 拒绝摄像头或麦克风权限时，用户仍可使用 `accessible="true"` 切换到反色题和 DTMF
+  听觉替代。
 
 ## 注意
 

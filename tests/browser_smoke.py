@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -65,6 +66,18 @@ def assert_no_overflow(page: Page) -> None:
     assert result["scrollWidth"] <= result["innerWidth"] + 1, result
     assert result["scrollWidth"] <= result["clientWidth"] + 1, result
     assert result["scrollHeight"] <= max(result["clientHeight"], 720), result
+
+
+def assert_no_horizontal_overflow(page: Page) -> None:
+    result = page.evaluate(
+        """() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+          innerWidth: window.innerWidth
+        })"""
+    )
+    assert result["scrollWidth"] <= result["innerWidth"] + 1, result
+    assert result["scrollWidth"] <= result["clientWidth"] + 1, result
 
 
 def wait_for_status(page: Page, fragment: str) -> str:
@@ -233,6 +246,86 @@ def solve_market(page: Page, state: dict, submit: bool = True) -> None:
         wait_for_status(page, "验证成功")
 
 
+def synthetic_speech_takes() -> list[list[list[float]]]:
+    takes = []
+    for take_index in range(1, 4):
+        frames = []
+        for frame in range(96):
+            bands = []
+            for band in range(7):
+                signal = math.sin(
+                    frame * (0.07 + band * 0.013) + take_index * 1.7 + band * 0.9
+                )
+                jitter = ((((frame * 17 + band * 31 + take_index * 13) % 23) - 11) / 220)
+                bands.append(0.5 + signal * 0.24 + jitter)
+            frames.append(bands)
+        takes.append(frames)
+    return takes
+
+
+def solve_human(page: Page, state: dict, submit: bool = True) -> None:
+    minimum = state["humanCheck"]["minDwellMs"]
+    page.locator("#oc-human-check").click()
+    assert page.locator("#oc-human-input").is_checked()
+    page.wait_for_timeout(minimum + 180)
+    assert page.locator("#oc-submit").is_enabled()
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def solve_rotate(page: Page, state: dict, submit: bool = True) -> None:
+    slider = page.locator("#oc-rotate-slider")
+    slider.evaluate(
+        """(element) => {
+          element.value = "0";
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+        }"""
+    )
+    assert page.locator("#oc-rotate-value").inner_text().strip() == "0°"
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def solve_semantic(page: Page, state: dict, submit: bool = True) -> None:
+    answer = state["semanticPick"]["answer"]
+    page.locator(f'.oc-choice[data-choice="{answer}"]').click()
+    assert "is-selected" in page.locator(f'.oc-choice[data-choice="{answer}"]').get_attribute(
+        "class"
+    )
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def solve_hand(page: Page, state: dict, submit: bool = True) -> None:
+    motion = state["handMotion"]
+    evidence = [
+        {"action": action, "durationMs": motion["holdMs"]}
+        for action in motion["sequence"]
+    ]
+    page.evaluate(
+        "(observations) => window.__oxygenHandTest(observations)",
+        evidence,
+    )
+    assert page.locator("#oc-submit").is_enabled()
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
+def solve_speech(page: Page, state: dict, submit: bool = True) -> None:
+    page.evaluate(
+        "(takes) => window.__oxygenSpeechTest(takes)",
+        synthetic_speech_takes(),
+    )
+    assert page.locator("#oc-submit").is_enabled()
+    if submit:
+        page.locator("#oc-submit").click()
+        wait_for_status(page, "验证成功")
+
+
 def screenshot_type(browser: Browser, challenge_type: str, viewport_name: str, viewport: dict[str, int]) -> None:
     page, errors = open_page(browser, viewport)
     page.goto(embed_url(challenge_type), wait_until="networkidle")
@@ -261,6 +354,20 @@ def screenshot_type(browser: Browser, challenge_type: str, viewport_name: str, v
     if challenge_type == "market_trade":
         assert page.locator("#oc-market-canvas").is_visible()
         assert page.locator("#oc-market-buy").is_visible()
+    if challenge_type == "human_check":
+        assert page.locator("#oc-human-input").is_visible()
+    if challenge_type == "rotate_align":
+        assert page.locator("#oc-rotate-slider").is_visible()
+    if challenge_type == "semantic_pick":
+        assert page.locator(".oc-semantic-choice").count() == 4
+    if challenge_type == "turnstile":
+        assert page.locator("#oc-turnstile").is_visible()
+    if challenge_type == "hand_motion":
+        assert page.locator("#oc-hand-video").is_visible()
+        assert page.locator("#oc-hand-start").is_visible()
+    if challenge_type == "speech_wave":
+        assert page.locator(".oc-speech-take").count() == 3
+        assert page.locator("#oc-speech-phrase mark").count() >= 1
     page.screenshot(path=str(OUT / f"{viewport_name}-{challenge_type}.png"), full_page=True)
     assert not errors, errors
 
@@ -432,6 +539,58 @@ def run_market_checks(browser: Browser) -> None:
     assert not errors, errors
 
 
+def run_basic_checks(browser: Browser) -> None:
+    for challenge_type, solver in (
+        ("human_check", solve_human),
+        ("rotate_align", solve_rotate),
+        ("semantic_pick", solve_semantic),
+    ):
+        page, errors = open_page(browser, {"width": 900, "height": 760}, reduced_motion="no-preference")
+        page.goto(embed_url(challenge_type), wait_until="networkidle")
+        state = challenge_state(page)
+        solver(page, state, submit=True)
+        page.screenshot(
+            path=str(OUT / f"desktop-{challenge_type}-success.png"),
+            full_page=True,
+        )
+        assert not errors, errors
+
+
+def run_media_checks(browser: Browser) -> None:
+    hand, hand_errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
+    hand.goto(embed_url("hand_motion"), wait_until="networkidle")
+    hand_state = challenge_state(hand)
+    solve_hand(hand, hand_state, submit=False)
+    hand.locator("#oc-submit").click()
+    wait_for_status(hand, "验证成功")
+    hand.screenshot(path=str(OUT / "desktop-hand-motion-success.png"), full_page=True)
+    assert not hand_errors, hand_errors
+
+    denied, denied_errors = open_page(browser, {"width": 900, "height": 820})
+    denied.goto(embed_url("hand_motion"), wait_until="networkidle")
+    denied.locator("#oc-hand-start").click()
+    denied.wait_for_function(
+        "() => document.querySelector('#oc-status')?.textContent.includes('摄像头')",
+        timeout=15_000,
+    )
+    assert "摄像头" in denied.locator("#oc-status").inner_text()
+    denied.screenshot(path=str(OUT / "desktop-hand-camera-denied.png"), full_page=True)
+    assert not denied_errors, denied_errors
+
+    speech, speech_errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
+    speech.goto(embed_url("speech_wave"), wait_until="networkidle")
+    speech_state = challenge_state(speech)
+    marks = speech.locator("#oc-speech-phrase mark").all_inner_texts()
+    target_words = speech_state["speechWave"]["targetWords"]
+    assert set(marks) == set(target_words), (marks, speech_state["speechWave"])
+    assert all(mark in marks for mark in target_words)
+    solve_speech(speech, speech_state, submit=False)
+    speech.locator("#oc-submit").click()
+    wait_for_status(speech, "验证成功")
+    speech.screenshot(path=str(OUT / "desktop-speech-wave-success.png"), full_page=True)
+    assert not speech_errors, speech_errors
+
+
 def run_accessible_check(browser: Browser) -> None:
     page, errors = open_page(browser, {"width": 390, "height": 844})
     page.goto(embed_url("grid_select", accessible=True), wait_until="networkidle")
@@ -439,6 +598,43 @@ def run_accessible_check(browser: Browser) -> None:
     assert page.locator("#oc-answer").is_visible()
     assert_no_overflow(page)
     assert not errors, errors
+
+
+def run_site_checks(browser: Browser) -> None:
+    for viewport_name, viewport in (
+        ("desktop", {"width": 1440, "height": 900}),
+        ("mobile", {"width": 390, "height": 844}),
+    ):
+        page, errors = open_page(browser, viewport)
+        page.goto(f"{BASE}/", wait_until="networkidle")
+        page.locator("h1").wait_for()
+        assert page.locator("#language-banner").is_visible()
+        initial = page.locator("h1").inner_text()
+        assert "Verify behavior" in initial or "验证行为" in initial
+        target = "en" if "验证行为" in initial else "zh"
+        page.locator(f'[data-language="{target}"]').click()
+        switched = page.locator("h1").inner_text()
+        assert ("Verify behavior" in switched) if target == "en" else ("验证行为" in switched)
+        hero = page.locator(".hero-media")
+        assert hero.is_visible()
+        assert hero.evaluate("(image) => image.naturalWidth") > 0
+        assert_no_horizontal_overflow(page)
+        page.screenshot(path=str(OUT / f"{viewport_name}-official-site.png"), full_page=True)
+        assert not errors, errors
+
+    captcha, captcha_errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
+    captcha.goto(f"{BASE}/captcha", wait_until="networkidle")
+    captcha.locator(".oc-shell").wait_for()
+    challenge_type = captcha.locator("body").get_attribute("data-challenge-type")
+    assert challenge_type
+    captcha.screenshot(path=str(OUT / "desktop-captcha-random.png"), full_page=True)
+    assert not captcha_errors, captcha_errors
+
+    platform, platform_errors = open_page(browser, {"width": 900, "height": 760})
+    platform.goto(f"{BASE}/platform", wait_until="networkidle")
+    assert platform.locator(".panel").is_visible()
+    platform.screenshot(path=str(OUT / "desktop-platform.png"), full_page=True)
+    assert not platform_errors, platform_errors
 
 
 def solve_current(page: Page, state: dict, submit: bool = True) -> None:
@@ -463,6 +659,16 @@ def solve_current(page: Page, state: dict, submit: bool = True) -> None:
         solve_count(page, state, submit=False)
     elif challenge_type == "market_trade":
         solve_market(page, state, submit=False)
+    elif challenge_type == "human_check":
+        solve_human(page, state, submit=False)
+    elif challenge_type == "rotate_align":
+        solve_rotate(page, state, submit=False)
+    elif challenge_type == "semantic_pick":
+        solve_semantic(page, state, submit=False)
+    elif challenge_type == "hand_motion":
+        solve_hand(page, state, submit=False)
+    elif challenge_type == "speech_wave":
+        solve_speech(page, state, submit=False)
     else:
         raise AssertionError(f"unsupported type {challenge_type}")
     if submit:
@@ -474,15 +680,17 @@ def run_risk_session(browser: Browser) -> None:
     page, errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
     page.goto(embed_url(risk="medium"), wait_until="networkidle")
     first_progress = page.locator(".oc-progress").inner_text()
-    assert first_progress.strip() == "1 / 4", first_progress
+    total_steps = int(first_progress.strip().split("/")[1])
+    assert total_steps >= 3, first_progress
+    assert first_progress.strip() == f"1 / {total_steps}", first_progress
 
-    for step in range(1, 5):
+    for step in range(1, total_steps + 1):
         state = challenge_state(page)
         assert state["stepIndex"] + 1 == step, state
         solve_current(page, state, submit=False)
         previous_id = state["id"]
         page.locator("#oc-submit").click()
-        if step < 4:
+        if step < total_steps:
             page.wait_for_function(
                 "(previousId) => document.querySelector('.oc-shell')?.getAttribute('data-challenge-id') !== previousId",
                 arg=previous_id,
@@ -492,7 +700,7 @@ def run_risk_session(browser: Browser) -> None:
             page.wait_for_load_state("networkidle")
         else:
             wait_for_status(page, "验证成功")
-    assert page.locator(".oc-progress").inner_text().strip() == "4 / 4"
+    assert page.locator(".oc-progress").inner_text().strip() == f"{total_steps} / {total_steps}"
     page.screenshot(path=str(OUT / "desktop-risk-session-success.png"), full_page=True)
     assert not errors, errors
 
@@ -597,6 +805,11 @@ with sync_playwright() as playwright:
         "pattern_memory",
         "count_flash",
         "market_trade",
+        "human_check",
+        "rotate_align",
+        "semantic_pick",
+        "hand_motion",
+        "speech_wave",
     ):
         for viewport_name, viewport in viewports.items():
             screenshot_type(browser, challenge_type, viewport_name, viewport)
@@ -610,7 +823,12 @@ with sync_playwright() as playwright:
     run_pattern_checks(browser)
     run_count_checks(browser)
     run_market_checks(browser)
+    run_basic_checks(browser)
+    run_media_checks(browser)
     run_accessible_check(browser)
+    run_site_checks(browser)
+    browser.close()
+    browser = playwright.chromium.launch(**launch_options)
     run_risk_session(browser)
     run_cross_origin_embed(browser)
     browser.close()

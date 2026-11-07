@@ -1,7 +1,8 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.3` 提供 API-only 服务、
-可嵌入 Web Component、跨域 iframe、一次性验证令牌、风险会话和九类交互挑战：
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.4` 提供 OC 官网、
+随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
+一次性验证令牌、风险会话和十五类交互挑战：
 
 - `inverse_occlusion`：同色 DOM 诱饵 + 反色透明数字图。
 - `grid_select`：3×3 Lucide 图标多选。
@@ -12,12 +13,20 @@
 - `pattern_memory`：观察并重复随机闪烁的图标序列。
 - `count_flash`：记住瞬时出现的小规模圆点数量。
 - `market_trade`：在价格曲线低点买入、高点卖出。
+- `human_check`：Cloudflare Type “我不是机器人”交互检查。
+- `rotate_align`：旋转图形回到正方向。
+- `semantic_pick`：轻量常识与语义选择。
+- `turnstile`：Cloudflare Turnstile 托管验证。
+- `hand_motion`：WebCam 本地 MediaPipe 手部骨骼动态动作序列。
+- `speech_wave`：同一句多遍朗读，比较指定字词窗口的声学非严格一致性。
 
-`low` 风险会话为 3 步，`medium/high/critical` 分别为 4/6/8 步。显式指定
+自动风险评分会综合 UA、Sec-CH-UA、平台/系统版本、语言、Cloudflare 国家、IP 频次与
+UA 轮换；`low` 风险会话为 3 步，`medium/high/critical` 分别为 4/6/8 步。显式指定
 `challengeType` 或使用无障碍模式时保持单步；中间步骤不会签发令牌，最后一步通过后才签发。
 
 服务没有仪表盘，只暴露 Challenge、资源、嵌入页和 `siteverify` 接口。视觉采用紧凑白色
-验证卡、冷灰画布、统一蓝色强调色、44px 触控目标和自动尺寸 iframe。
+验证卡、冷灰画布、统一蓝色强调色、44px 触控目标和自动尺寸 iframe。官网顶部横幅会
+根据浏览器语言自动选择中文或英文，并允许用户随时切换。
 
 ## 快速开始
 
@@ -71,6 +80,8 @@ python tests/browser_smoke.py
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
+| `GET` | `/` | OC 官网 |
+| `GET` | `/captcha` | 浏览器随机挑战入口 |
 | `POST` | `/v1/challenges` | 创建 JSON Challenge |
 | `GET` | `/embed` | 创建服务端渲染 Widget |
 | `POST` | `/v1/challenges/:id/verify` | 提交答案或交互证据 |
@@ -80,7 +91,11 @@ python tests/browser_smoke.py
 | `GET` | `/v1/challenges/:id/tile/:index.svg` | 网格选项图标 |
 | `GET` | `/v1/challenges/:id/sequence.wav` | 动物声音序列 |
 | `POST` | `/v1/siteverify` | 服务端消费一次性令牌 |
+| `GET` | `/v1/meta` | API 与题型元信息 |
 | `GET` | `/healthz` | 健康检查 |
+| `GET` | `/platform` | OxygenAccount 开放平台 |
+| `GET` | `/auth/login` | OxygenAccount OIDC 登录 |
+| `GET/POST/DELETE` | `/api/platform/apps` | 创建、轮换与停用应用 |
 
 嵌入接入：
 
@@ -88,6 +103,7 @@ python tests/browser_smoke.py
 - [嵌入文档](docs/embed.zh.md)
 - [服务端接入](docs/integration.zh.md)
 - [安全边界](docs/security.zh.md)
+- [开放平台与 OxygenAccount](docs/platform.zh.md)
 - [部署运维](docs/operations.zh.md)
 - [当前部署状态](docs/deployment-status.zh.md)
 - [OpenAPI](openapi.yaml)
@@ -106,15 +122,16 @@ python tests/browser_smoke.py
 - 当前状态存储为单进程内存；多实例部署前必须迁移到 Redis/Valkey。
 
 反色诱饵是强 DOM/WebFetch 风险信号，但不是完整的人类证明。截图视觉模型、真人代答和
-持有站点 secret 的攻击者仍在威胁模型之外。麦克风、摄像头和主动说话/手势验证只进入研究
-路线，本版本不会请求这些权限。
+持有站点 secret 的攻击者仍在威胁模型之外。摄像头帧只在设备本地由 MediaPipe 处理，
+麦克风只提交设备端频段特征；拒绝权限时保留反色题与听觉替代。
 
 ## 开源依赖
 
 图形使用 [Rough.js](https://github.com/pshihn/rough)，图标使用
 [Lucide](https://github.com/lucide-icons/lucide)，反馈音效使用
 [ZzFX](https://github.com/KilledByAPixel/ZzFX)。动物声音由服务端程序合成，不包含第三方
-录音。完整声明见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
+录音。手部骨骼识别使用 [MediaPipe Tasks Vision](https://github.com/google-ai-edge/mediapipe)
+及其 Hand Landmarker 模型。完整声明见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
 
 ## 研究
 
@@ -122,7 +139,7 @@ python tests/browser_smoke.py
 
 `C:\Users\Sails\Documents\Workspace\02-Research\OxygenChallenge-WF-2026-11-06`
 
-Public 仓库：<https://github.com/OxygenAILab/OxygenCaptcha>
+Private 仓库：<https://github.com/OxygenAILab/OxygenChallenge>
 
 ## License
 

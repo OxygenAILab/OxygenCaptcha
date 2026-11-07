@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+.data/
 _devdocs/
 scripts/deploy_hk.py
 scripts/hcaptcha_reference.py

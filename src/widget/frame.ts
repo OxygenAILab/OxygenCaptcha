@@ -1,20 +1,33 @@
 import {
   Accessibility,
   Bird,
+  Camera,
   Cat,
   Check,
   createElement,
   Dog,
   Eye,
   Heart,
+  Mic,
   Moon,
   Play,
   RefreshCw,
+  RotateCw,
+  ShieldCheck,
   Star,
   Sun,
   Volume2,
 } from "lucide";
 import { zzfx } from "zzfx";
+import {
+  FilesetResolver,
+  HandLandmarker,
+} from "../../vendor/mediapipe-tasks-vision/vision_bundle.mjs";
+import {
+  classifyHand,
+  HAND_CONNECTIONS,
+  type HandLandmark,
+} from "../gestures.js";
 import {
   countFlashPoints,
   countFromSeed,
@@ -31,6 +44,33 @@ type MotionData = {
 };
 
 type MotionPoint = { x: number; y: number; elapsedMs: number };
+
+type TurnstileApi = {
+  render(
+    container: HTMLElement,
+    options: {
+      sitekey: string;
+      theme: "light";
+      language: string;
+      callback: (token: string) => void;
+      "expired-callback": () => void;
+      "error-callback": () => void;
+    },
+  ): string;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+    __oxygenHandTest?: (
+      observations: Array<{
+        action: "open" | "fist" | "peace";
+        durationMs: number;
+      }>,
+    ) => void;
+    __oxygenSpeechTest?: (takes: number[][][]) => void;
+  }
+}
 
 const form = document.querySelector<HTMLFormElement>("#oc-form");
 const shell = document.querySelector<HTMLElement>(".oc-shell");
@@ -53,13 +93,38 @@ const marketCanvas = document.querySelector<HTMLCanvasElement>("#oc-market-canva
 const marketBuyButton = document.querySelector<HTMLButtonElement>("#oc-market-buy");
 const marketSellButton = document.querySelector<HTMLButtonElement>("#oc-market-sell");
 const marketHelp = document.querySelector<HTMLElement>("#oc-market-help");
+const humanCheck = document.querySelector<HTMLElement>("#oc-human-check");
+const humanInput = document.querySelector<HTMLInputElement>("#oc-human-input");
+const rotateObject = document.querySelector<HTMLElement>("#oc-rotate-object");
+const rotateSlider = document.querySelector<HTMLInputElement>("#oc-rotate-slider");
+const rotateValue = document.querySelector<HTMLOutputElement>("#oc-rotate-value");
+const turnstileShell = document.querySelector<HTMLElement>("#oc-turnstile");
+const handVideo = document.querySelector<HTMLVideoElement>("#oc-hand-video");
+const handOverlay = document.querySelector<HTMLCanvasElement>("#oc-hand-overlay");
+const handPlaceholder = document.querySelector<HTMLElement>("#oc-camera-placeholder");
+const handStart = document.querySelector<HTMLButtonElement>("#oc-hand-start");
+const handHelp = document.querySelector<HTMLElement>("#oc-hand-help");
+const actionSequence = document.querySelector<HTMLElement>("#oc-action-sequence");
+const speechPhrase = document.querySelector<HTMLElement>("#oc-speech-phrase");
+const speechTakes = document.querySelector<HTMLElement>("#oc-speech-takes");
+const speechWave = document.querySelector<HTMLCanvasElement>("#oc-speech-wave");
+const speechRecord = document.querySelector<HTMLButtonElement>("#oc-speech-record");
+const speechHelp = document.querySelector<HTMLElement>("#oc-speech-help");
 const gestureWrap = document.querySelector<HTMLElement>(".oc-gesture-wrap");
 const motionWrap = document.querySelector<HTMLElement>(".oc-motion-wrap");
 const motionCanvas = document.querySelector<HTMLCanvasElement>("#oc-motion-canvas");
 const motionHelp = document.querySelector<HTMLElement>("#oc-motion-help");
 const type = body.dataset.challengeType ?? "inverse_occlusion";
+const testMode = body.dataset.testMode === "1";
+const pageStartedAt = performance.now();
 const selected = new Set<number>();
 let audioChoice: string | null = null;
+let semanticChoice: string | null = null;
+let turnstileToken: string | null = null;
+let handEvidence: Array<{ action: "open" | "fist" | "peace"; durationMs: number }> =
+  [];
+let audioTakes: number[][][] = [];
+let rotateAngle = Number.parseFloat(rotateSlider?.value ?? "0");
 let patternSelection: number[] = [];
 let marketBuyIndex: number | null = null;
 let marketSellIndex: number | null = null;
@@ -209,6 +274,9 @@ function initGrid(): void {
 }
 
 function initAudioSequence(): void {
+  if (type !== "audio_sequence") {
+    return;
+  }
   appendIcon(playSequenceButton, Play);
   const choiceIcons = { cat: Cat, dog: Dog, bird: Bird };
 
@@ -264,6 +332,512 @@ function initAudioSequence(): void {
       setStatus("无法播放音频，请检查设备设置。", "error");
     });
   });
+}
+
+function initSemanticPick(): void {
+  if (type !== "semantic_pick" || !choices) {
+    return;
+  }
+  choices.querySelectorAll<HTMLButtonElement>(".oc-choice").forEach((choice) => {
+    const check = choice.querySelector(".oc-choice-check");
+    if (check && !check.firstElementChild) {
+      check.append(
+        createElement(Check, {
+          width: 16,
+          height: 16,
+          "stroke-width": 2.4,
+          "aria-hidden": "true",
+        }),
+      );
+    }
+    choice.addEventListener("click", () => {
+      semanticChoice = choice.dataset.choice ?? null;
+      choices.querySelectorAll<HTMLButtonElement>(".oc-choice").forEach((item) => {
+        const active = item.dataset.choice === semanticChoice;
+        item.classList.toggle("is-selected", active);
+        item.setAttribute("aria-pressed", String(active));
+      });
+      if (submit) {
+        submit.disabled = semanticChoice === null;
+      }
+      setStatus("");
+      play("click");
+    });
+  });
+}
+
+function initHumanCheck(): void {
+  if (type !== "human_check" || !humanCheck || !humanInput || !submit) {
+    return;
+  }
+  const minimum = Number.parseInt(humanCheck.dataset.minDwell ?? "700", 10);
+  const observedAt = performance.now();
+  humanInput.addEventListener("change", () => {
+    if (!humanInput.checked) {
+      submit.disabled = true;
+      return;
+    }
+    const remaining = Math.max(0, minimum - (performance.now() - observedAt));
+    setStatus("正在完成交互检查…");
+    window.setTimeout(() => {
+      submit.disabled = false;
+      setStatus("交互检查完成。", "success");
+    }, remaining);
+  });
+}
+
+function initRotateAlign(): void {
+  if (
+    type !== "rotate_align" ||
+    !rotateObject ||
+    !rotateSlider ||
+    !rotateValue
+  ) {
+    return;
+  }
+  rotateAngle = Number.parseFloat(rotateSlider.value);
+  rotateObject.style.transform = `rotate(${rotateAngle}deg)`;
+  rotateSlider.addEventListener("input", () => {
+    rotateAngle = Number.parseFloat(rotateSlider.value);
+    rotateObject.style.transform = `rotate(${rotateAngle}deg)`;
+    rotateValue.value = `${Math.round(rotateAngle)}°`;
+    setStatus("");
+  });
+}
+
+function initTurnstile(): void {
+  if (type !== "turnstile" || !turnstileShell || !submit) {
+    return;
+  }
+  const started = performance.now();
+  const render = () => {
+    const siteKey = turnstileShell.dataset.sitekey ?? "";
+    if (!window.turnstile || !siteKey) {
+      if (performance.now() - started > 12_000) {
+        setStatus("Cloudflare 验证组件加载失败。", "error");
+        return;
+      }
+      window.setTimeout(render, 100);
+      return;
+    }
+    window.turnstile.render(turnstileShell, {
+      sitekey: siteKey,
+      theme: "light",
+      language: "zh-CN",
+      callback: (token) => {
+        turnstileToken = token;
+        submit.disabled = false;
+        setStatus("Cloudflare 验证完成。", "success");
+      },
+      "expired-callback": () => {
+        turnstileToken = null;
+        submit.disabled = true;
+        setStatus("Cloudflare 验证已过期，请重试。", "error");
+      },
+      "error-callback": () => {
+        turnstileToken = null;
+        submit.disabled = true;
+        setStatus("Cloudflare 验证失败，请重试。", "error");
+      },
+    });
+  };
+  render();
+}
+
+function drawHandSkeleton(
+  canvas: HTMLCanvasElement,
+  hands: HandLandmark[][],
+): void {
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return;
+  }
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.lineWidth = 2;
+  context.strokeStyle = "#2f6fed";
+  context.fillStyle = "#ffffff";
+  for (const landmarks of hands) {
+    for (const [fromIndex, toIndex] of HAND_CONNECTIONS) {
+      const from = landmarks[fromIndex];
+      const to = landmarks[toIndex];
+      if (!from || !to) {
+        continue;
+      }
+      context.beginPath();
+      context.moveTo(from.x * canvas.width, from.y * canvas.height);
+      context.lineTo(to.x * canvas.width, to.y * canvas.height);
+      context.stroke();
+    }
+    for (const landmark of landmarks) {
+      context.beginPath();
+      context.arc(
+        landmark.x * canvas.width,
+        landmark.y * canvas.height,
+        3.2,
+        0,
+        Math.PI * 2,
+      );
+      context.fill();
+    }
+  }
+}
+
+function initHandMotion(): void {
+  if (
+    type !== "hand_motion" ||
+    !handVideo ||
+    !handOverlay ||
+    !handStart ||
+    !actionSequence ||
+    !submit
+  ) {
+    return;
+  }
+  const sequence = (actionSequence.dataset.sequence ?? "")
+    .split(",")
+    .filter(
+      (action): action is "open" | "fist" | "peace" =>
+        action === "open" || action === "fist" || action === "peace",
+    );
+  const holdMs = Number.parseInt(actionSequence.dataset.hold ?? "450", 10);
+  let stream: MediaStream | null = null;
+  let landmarker: HandLandmarker | null = null;
+  let running = false;
+  let currentIndex = 0;
+  let holdStartedAt = 0;
+  let lastVideoTime = -1;
+  const observations: Array<{
+    action: "open" | "fist" | "peace";
+    durationMs: number;
+  }> = [];
+
+  appendIcon(handStart, Camera);
+  const setCurrentAction = () => {
+    actionSequence.querySelectorAll<HTMLElement>(".oc-action-chip").forEach((chip, index) => {
+      chip.classList.toggle("is-complete", index < currentIndex);
+      chip.classList.toggle("is-current", index === currentIndex);
+    });
+  };
+  setCurrentAction();
+
+  const stop = () => {
+    running = false;
+    for (const track of stream?.getTracks() ?? []) {
+      track.stop();
+    }
+    stream = null;
+    landmarker?.close();
+    landmarker = null;
+  };
+
+  const detect = () => {
+    if (!running) {
+      return;
+    }
+    if (
+      landmarker &&
+      handVideo.readyState >= 2 &&
+      handVideo.currentTime !== lastVideoTime
+    ) {
+      lastVideoTime = handVideo.currentTime;
+      try {
+        const result = landmarker.detectForVideo(handVideo, performance.now());
+        const hands = result.landmarks as HandLandmark[][];
+        drawHandSkeleton(handOverlay, hands);
+        const action = classifyHand(hands[0] ?? []);
+        const expected = sequence[currentIndex];
+        if (action !== "unknown" && action === expected) {
+          if (holdStartedAt === 0) {
+            holdStartedAt = performance.now();
+          }
+          const held = Math.round(performance.now() - holdStartedAt);
+          if (handHelp) {
+            handHelp.textContent = `保持${action === "open" ? "张开手掌" : action === "fist" ? "握拳" : "剪刀手"} ${Math.min(100, Math.round((held / holdMs) * 100))}%`;
+          }
+          if (held >= holdMs) {
+            observations.push({ action, durationMs: held });
+            currentIndex += 1;
+            holdStartedAt = 0;
+            setCurrentAction();
+            if (currentIndex >= sequence.length) {
+              handEvidence = observations;
+              stop();
+              if (handPlaceholder) {
+                handPlaceholder.textContent = "动作序列已完成";
+                handPlaceholder.hidden = false;
+              }
+              submit.disabled = false;
+              setStatus("动态手势已完成，可以验证。", "success");
+              return;
+            }
+            setStatus(`动作 ${currentIndex} / ${sequence.length} 已完成。`, "success");
+          }
+        } else {
+          holdStartedAt = 0;
+          if (handHelp) {
+            handHelp.textContent = `请完成：${expected === "open" ? "张开手掌" : expected === "fist" ? "握拳" : "剪刀手"}`;
+          }
+        }
+      } catch {
+        setStatus("手势识别失败，请调整光线后重试。", "error");
+      }
+    }
+    requestAnimationFrame(detect);
+  };
+
+  handStart.addEventListener("click", async () => {
+    if (running) {
+      return;
+    }
+    handStart.disabled = true;
+    setStatus("正在请求摄像头…");
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: false,
+      });
+      handVideo.srcObject = stream;
+      await handVideo.play();
+      if (handPlaceholder) {
+        handPlaceholder.hidden = true;
+      }
+      const fileset = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
+      try {
+        landmarker = await HandLandmarker.createFromOptions(fileset, {
+          baseOptions: {
+            modelAssetPath: "/models/hand_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numHands: 1,
+          minHandDetectionConfidence: 0.5,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+      } catch {
+        landmarker = await HandLandmarker.createFromOptions(fileset, {
+          baseOptions: {
+            modelAssetPath: "/models/hand_landmarker.task",
+            delegate: "CPU",
+          },
+          runningMode: "VIDEO",
+          numHands: 1,
+        });
+      }
+      running = true;
+      setStatus("请按顺序完成手势。");
+      requestAnimationFrame(detect);
+    } catch (error) {
+      stop();
+      handStart.disabled = false;
+      setStatus(
+        error instanceof DOMException && error.name === "NotAllowedError"
+          ? "摄像头权限被拒绝，可改用无障碍验证。"
+          : "无法启用摄像头或手势模型。",
+        "error",
+      );
+    }
+  });
+
+  if (testMode) {
+    window.__oxygenHandTest = (testObservations) => {
+      handEvidence = testObservations;
+      submit.disabled = false;
+      setStatus("测试手势已载入。", "success");
+    };
+  }
+}
+
+function drawSpeechWave(canvas: HTMLCanvasElement, values: number[]): void {
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return;
+  }
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#edf2f8";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = "#2f6fed";
+  context.lineWidth = 1.5;
+  context.beginPath();
+  values.forEach((value, index) => {
+    const x = (index / Math.max(1, values.length - 1)) * canvas.width;
+    const y = canvas.height / 2 - value * canvas.height * 0.42;
+    if (index === 0) {
+      context.moveTo(x, y);
+    } else {
+      context.lineTo(x, y);
+    }
+  });
+  context.stroke();
+}
+
+function downsampleFrames(frames: number[][], maximum = 120): number[][] {
+  if (frames.length <= maximum) {
+    return frames;
+  }
+  return Array.from({ length: maximum }, (_, index) => {
+    const frame = frames[Math.floor((index / maximum) * frames.length)];
+    return frame ?? [];
+  });
+}
+
+function initSpeechWave(): void {
+  if (
+    type !== "speech_wave" ||
+    !speechPhrase ||
+    !speechRecord ||
+    !speechTakes ||
+    !speechWave ||
+    !submit
+  ) {
+    return;
+  }
+  const takeCount = Number.parseInt(speechPhrase.dataset.takeCount ?? "3", 10);
+  let takes: number[][][] = [];
+  let recording = false;
+  let stream: MediaStream | null = null;
+  let audioContext: AudioContext | null = null;
+  let timer = 0;
+  let frames: number[][] = [];
+  let waveform: number[] = [];
+
+  appendIcon(speechRecord, Mic);
+  const updateCards = () => {
+    speechTakes.querySelectorAll<HTMLElement>(".oc-speech-take").forEach((card, index) => {
+      const status = card.querySelector("strong");
+      const recorded = index < takes.length;
+      card.classList.toggle("is-recorded", recorded);
+      if (status) {
+        status.textContent = recorded ? "已记录" : "未录制";
+      }
+    });
+  };
+
+  const finishTake = async () => {
+    recording = false;
+    window.clearInterval(timer);
+    timer = 0;
+    for (const track of stream?.getTracks() ?? []) {
+      track.stop();
+    }
+    stream = null;
+    await audioContext?.close();
+    audioContext = null;
+    const energyIndex = 6;
+    const active = frames.filter((frame) => (frame[energyIndex] ?? 0) > 0.09);
+    const trimmed = (active.length >= 12 ? active : frames).slice(0, 160);
+    if (trimmed.length < 20) {
+      setStatus("录制时间太短，请完整朗读整句。", "error");
+      speechRecord.disabled = false;
+      speechRecord.textContent = `录制第 ${takes.length + 1} 遍`;
+      return;
+    }
+    takes.push(downsampleFrames(trimmed));
+    updateCards();
+    speechRecord.disabled = takes.length >= takeCount;
+    speechRecord.textContent =
+      takes.length >= takeCount ? "已完成录制" : `录制第 ${takes.length + 1} 遍`;
+    if (takes.length >= takeCount) {
+      audioTakes = takes;
+      submit.disabled = false;
+      setStatus("三遍录制完成，可以验证。", "success");
+      if (speechHelp) {
+        speechHelp.textContent = "频段特征已准备好，原始音频未上传。";
+      }
+    } else {
+      setStatus(`第 ${takes.length} 遍已记录。`, "success");
+    }
+  };
+
+  const startTake = async () => {
+    if (takes.length >= takeCount) {
+      takes = [];
+      audioTakes = [];
+      submit.disabled = true;
+      updateCards();
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+      const Context =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      audioContext = new Context();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.55;
+      source.connect(analyser);
+      const spectrum = new Uint8Array(analyser.frequencyBinCount);
+      frames = [];
+      waveform = [];
+      recording = true;
+      speechRecord.disabled = false;
+      speechRecord.textContent = "停止本遍";
+      setStatus(`正在录制第 ${takes.length + 1} 遍…`);
+      timer = window.setInterval(() => {
+        analyser.getByteFrequencyData(spectrum);
+        const bands = Array.from({ length: 6 }, (_, band) => {
+          const from = Math.floor((band / 6) ** 1.7 * spectrum.length);
+          const to = Math.max(from + 1, Math.floor(((band + 1) / 6) ** 1.7 * spectrum.length));
+          let total = 0;
+          for (let index = from; index < to; index += 1) {
+            total += spectrum[index] ?? 0;
+          }
+          return total / Math.max(1, to - from) / 255;
+        });
+        const energy =
+          spectrum.reduce((total, value) => total + value, 0) /
+          Math.max(1, spectrum.length) /
+          255;
+        frames.push([...bands, energy]);
+        waveform.push(energy);
+        if (waveform.length > 90) {
+          waveform = waveform.slice(-90);
+        }
+        drawSpeechWave(speechWave, waveform);
+      }, 50);
+    } catch {
+      recording = false;
+      speechRecord.disabled = false;
+      setStatus("无法访问麦克风，可改用无障碍验证。", "error");
+    }
+  };
+
+  speechRecord.addEventListener("click", () => {
+    if (recording) {
+      void finishTake();
+    } else {
+      void startTake();
+    }
+  });
+  updateCards();
+
+  if (testMode) {
+    window.__oxygenSpeechTest = (featureTakes: number[][][]) => {
+      takes = featureTakes;
+      audioTakes = featureTakes;
+      updateCards();
+      speechRecord.disabled = true;
+      speechRecord.textContent = "已完成录制";
+      submit.disabled = false;
+      setStatus("测试音频特征已载入。", "success");
+      if (speechHelp) {
+        speechHelp.textContent = "频段特征已准备好，原始音频未上传。";
+      }
+    };
+  }
 }
 
 function initPatternMemory(): void {
@@ -870,6 +1444,12 @@ appendIcon(audioButton, Volume2);
 appendIcon(accessibleButton, Accessibility);
 initGrid();
 initAudioSequence();
+initSemanticPick();
+initHumanCheck();
+initRotateAlign();
+initTurnstile();
+initHandMotion();
+initSpeechWave();
 initPatternMemory();
 initCountFlash();
 initMarketTrade();
@@ -968,6 +1548,39 @@ form?.addEventListener("submit", async (event) => {
       buyIndex: marketBuyIndex,
       sellIndex: marketSellIndex,
     };
+  } else if (type === "human_check") {
+    if (!humanInput?.checked) {
+      setStatus("请先勾选确认框。", "error");
+      return;
+    }
+    payload.answer = "human";
+    payload.dwellMs = Math.round(performance.now() - pageStartedAt);
+  } else if (type === "rotate_align") {
+    payload.angle = rotateAngle;
+  } else if (type === "semantic_pick") {
+    if (!semanticChoice) {
+      setStatus("请选择一个答案。", "error");
+      return;
+    }
+    payload.answer = semanticChoice;
+  } else if (type === "turnstile") {
+    if (!turnstileToken) {
+      setStatus("请先完成 Cloudflare 验证。", "error");
+      return;
+    }
+    payload.turnstileToken = turnstileToken;
+  } else if (type === "hand_motion") {
+    if (handEvidence.length === 0) {
+      setStatus("请先完成动态手势。", "error");
+      return;
+    }
+    payload.handGestures = handEvidence;
+  } else if (type === "speech_wave") {
+    if (audioTakes.length === 0) {
+      setStatus("请先完成三遍朗读。", "error");
+      return;
+    }
+    payload.audioTakes = audioTakes;
   } else {
     if (!motionReady || !motionPoint) {
       setStatus("请先持续覆盖移动目标。", "error");

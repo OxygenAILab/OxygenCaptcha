@@ -51,10 +51,26 @@ await build({
 });
 
 await build({
+  entryPoints: [resolve(root, "src/platform/client.ts")],
+  bundle: true,
+  platform: "browser",
+  format: "iife",
+  target: ["chrome110", "firefox110", "safari16"],
+  outfile: resolve(publicDir, "platform.js"),
+  minify: true,
+  sourcemap: true,
+});
+
+await build({
   entryPoints: [resolve(root, "src/widget/styles.css")],
   bundle: true,
   outfile: resolve(publicDir, "widget.css"),
   minify: true,
 });
 
+await cp(
+  resolve(root, "vendor/mediapipe-tasks-vision/wasm"),
+  resolve(publicDir, "mediapipe/wasm"),
+  { recursive: true },
+);
 await cp(resolve(root, "public"), publicDir, { recursive: true });

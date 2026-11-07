@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.0-alpha.3
-  description: Risk-aware CAPTCHA API with visual, motion, audio, calculation and dual-input challenges.
+  version: 26.0.0-alpha.4
+  description: Risk-aware CAPTCHA API with visual, motion, audio, calculation, camera, speech and Cloudflare Turnstile challenges.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -14,6 +14,8 @@ paths:
     post:
       operationId: createChallenge
       summary: Create a one-time challenge
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
       requestBody:
         required: true
         content:
@@ -145,6 +147,8 @@ paths:
     post:
       operationId: siteverify
       summary: Consume a verification token
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
       requestBody:
         required: true
         content:
@@ -240,6 +244,14 @@ paths:
           description: Service unavailable
 components:
   parameters:
+    ApiVersion:
+      in: header
+      name: X-Oxygen-Challenge-API-Version
+      required: false
+      description: Optional version assertion. Use `1` or `v1`.
+      schema:
+        type: string
+        enum: ["1", "v1"]
     ChallengeId:
       in: path
       name: id
@@ -259,6 +271,12 @@ components:
         - pattern_memory
         - count_flash
         - market_trade
+        - human_check
+        - rotate_align
+        - semantic_pick
+        - turnstile
+        - hand_motion
+        - speech_wave
     RiskLevel:
       type: string
       enum: [low, medium, high, critical]
@@ -385,6 +403,70 @@ components:
               type: number
             height:
               type: number
+        humanCheck:
+          type: object
+          properties:
+            minDwellMs:
+              type: integer
+        rotateAlign:
+          type: object
+          properties:
+            initialAngle:
+              type: number
+            tolerance:
+              type: number
+        semanticPick:
+          type: object
+          properties:
+            question:
+              type: string
+            options:
+              type: array
+              items:
+                type: object
+                required: [key, label]
+                properties:
+                  key:
+                    type: string
+                  label:
+                    type: string
+        turnstileSiteKey:
+          type: string
+        handMotion:
+          type: object
+          properties:
+            sequence:
+              type: array
+              maxItems: 4
+              items:
+                type: string
+                enum: [open, fist, peace]
+            holdMs:
+              type: integer
+        speechWave:
+          type: object
+          properties:
+            phrase:
+              type: string
+            targetWords:
+              type: array
+              items:
+                type: string
+            focusWindows:
+              type: array
+              items:
+                type: object
+                required: [targetWord, start, end]
+                properties:
+                  targetWord:
+                    type: string
+                  start:
+                    type: number
+                  end:
+                    type: number
+            takeCount:
+              type: integer
+              const: 3
     ChallengeEvidence:
       type: object
       properties:
@@ -424,6 +506,44 @@ components:
             sellIndex:
               type: integer
               minimum: 0
+        dwellMs:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        angle:
+          type: number
+          minimum: -180
+          maximum: 180
+        turnstileToken:
+          type: string
+          maxLength: 2048
+        handGestures:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [action, durationMs]
+            properties:
+              action:
+                type: string
+                enum: [open, fist, peace]
+              durationMs:
+                type: integer
+                minimum: 0
+                maximum: 5000
+        audioTakes:
+          type: array
+          maxItems: 3
+          items:
+            type: array
+            maxItems: 160
+            items:
+              type: array
+              maxItems: 8
+              items:
+                type: number
+                minimum: -8
+                maximum: 8
     VerificationReceipt:
       type: object
       required: [verified, token, assuranceLevel, action, siteKey, expiresAt]
