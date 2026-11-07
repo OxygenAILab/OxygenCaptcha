@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.0-alpha.4
+  version: 26.0.0-alpha.5
   description: Risk-aware CAPTCHA API with visual, motion, audio, calculation, camera, speech and Cloudflare Turnstile challenges.
   license:
     name: Apache-2.0
@@ -59,6 +59,49 @@ paths:
                   - $ref: "#/components/schemas/VerificationFailure"
         "410":
           description: Challenge expired or consumed
+  /v1/challenges/{id}/swap:
+    post:
+      operationId: swapChallenge
+      summary: Replace an eligible camera, microphone, or Turnstile challenge
+      description: Desktop media challenges can be replaced once. Passing `accessible: true` requests the audio-enabled inverse-occlusion alternative.
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accessible:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Challenge replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [swapped, challengeId, type]
+                properties:
+                  swapped:
+                    type: boolean
+                  challengeId:
+                    type: string
+                  preview:
+                    type: boolean
+                  type:
+                    $ref: "#/components/schemas/ChallengeType"
+                  sessionId:
+                    type: string
+                  nextEmbedUrl:
+                    type: string
+                    format: uri
+        "403":
+          description: Replacement is not allowed for this device or challenge
+        "404":
+          description: Challenge not found
   /v1/challenges/{id}/overlay.svg:
     get:
       operationId: getInverseOverlay
@@ -323,6 +366,13 @@ components:
           maximum: 8
         risk:
           $ref: "#/components/schemas/RiskLevel"
+        deviceClass:
+          type: string
+          enum: [desktop, mobile]
+        preview:
+          type: boolean
+        swapAllowed:
+          type: boolean
         expiresAt:
           type: string
           format: date-time
@@ -363,6 +413,10 @@ components:
               type: number
             durationMs:
               type: integer
+            requiredCoverageMs:
+              type: integer
+            targetRadius:
+              type: number
         options:
           type: array
           items:
@@ -371,7 +425,7 @@ components:
             properties:
               key:
                 type: string
-                enum: [cat, dog, bird]
+                enum: [cat, dog, bird, monkey, horse, snake, bear, mouse, elephant, seal]
               label:
                 type: string
         expression:
@@ -380,6 +434,10 @@ components:
           type: number
         requiredHoldMs:
           type: integer
+        requiredKey:
+          type: string
+        requiredKeyLabel:
+          type: string
         pattern:
           type: object
           properties:
@@ -402,6 +460,17 @@ components:
             width:
               type: number
             height:
+              type: number
+            mode:
+              type: string
+              enum: [single, target]
+            sampleMs:
+              type: integer
+            durationMs:
+              type: integer
+            initialCapital:
+              type: number
+            targetCapital:
               type: number
         humanCheck:
           type: object
@@ -437,10 +506,10 @@ components:
           properties:
             sequence:
               type: array
-              maxItems: 4
+              maxItems: 6
               items:
                 type: string
-                enum: [open, fist, peace]
+                enum: [open, fist, peace, thumb_up, thumb_down, point_up, ok, call_me, l_sign, pinky]
             holdMs:
               type: integer
         speechWave:
@@ -490,13 +559,32 @@ components:
               type: number
             elapsedMs:
               type: integer
+        coverageMs:
+          type: integer
+          minimum: 0
         holdMs:
           type: integer
           minimum: 0
+        keyCode:
+          type: string
         distance:
           type: number
           minimum: 0
+        marketTrades:
+          type: array
+          maxItems: 30
+          items:
+            type: object
+            required: [buyIndex, sellIndex]
+            properties:
+              buyIndex:
+                type: integer
+                minimum: 0
+              sellIndex:
+                type: integer
+                minimum: 0
         market:
+          description: Legacy single-trade shape retained for alpha.4 clients.
           type: object
           required: [buyIndex, sellIndex]
           properties:
@@ -519,14 +607,14 @@ components:
           maxLength: 2048
         handGestures:
           type: array
-          maxItems: 4
+          maxItems: 6
           items:
             type: object
             required: [action, durationMs]
             properties:
               action:
                 type: string
-                enum: [open, fist, peace]
+                enum: [open, fist, peace, thumb_up, thumb_down, point_up, ok, call_me, l_sign, pinky]
               durationMs:
                 type: integer
                 minimum: 0

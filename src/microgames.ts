@@ -20,7 +20,7 @@ export function patternSequence(seed: number, length: number): number[] {
 }
 
 export function countFromSeed(seed: number): number {
-  return 5 + (seed % 8);
+  return 3 + (seed % 3);
 }
 
 export function countFlashPoints(
@@ -28,21 +28,49 @@ export function countFlashPoints(
   count: number,
 ): Array<{ x: number; y: number; radius: number }> {
   const random = seededRandom(seed ^ 0x9e37_79b9);
-  return Array.from({ length: count }, () => ({
-    x: 0.12 + random() * 0.76,
-    y: 0.12 + random() * 0.76,
-    radius: 9 + random() * 6,
+  const canvas = { width: 360, height: 170 };
+  const radius = 11;
+  const targetCount = Math.min(5, Math.max(1, count));
+  const slots = [
+    { x: 70, y: 54, spreadX: 24, spreadY: 18 },
+    { x: 180, y: 54, spreadX: 24, spreadY: 18 },
+    { x: 290, y: 54, spreadX: 24, spreadY: 18 },
+    { x: 125, y: 124, spreadX: 24, spreadY: 16 },
+    { x: 235, y: 124, spreadX: 24, spreadY: 16 },
+  ];
+  for (let index = slots.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    const current = slots[index];
+    const other = slots[swapIndex];
+    if (current && other) {
+      slots[index] = other;
+      slots[swapIndex] = current;
+    }
+  }
+  return slots.slice(0, targetCount).map((slot) => ({
+    x:
+      (slot.x + (random() * 2 - 1) * slot.spreadX) /
+      canvas.width,
+    y:
+      (slot.y + (random() * 2 - 1) * slot.spreadY) /
+      canvas.height,
+    radius,
   }));
 }
 
-export function marketPrices(seed: number, count = 121): number[] {
-  const phase = ((seed % 1_000) / 1_000) * Math.PI * 2;
+export function marketPrices(seed: number, count = 60): number[] {
+  const random = seededRandom(seed ^ 0x5bd1_e995);
+  const phase = ((seed % 997) / 997) * Math.PI * 2;
+  const cycles = 2 + (seed % 2);
+  let noise = 0;
   return Array.from({ length: count }, (_, index) => {
     const t = index / Math.max(1, count - 1);
-    const trend = 0.5 + 0.28 * Math.sin(Math.PI * 2 * (t - 0.45) + phase * 0.08);
-    const wave = 0.024 * Math.sin(index * 1.73 + phase);
-    const micro = 0.012 * Math.sin(index * 0.47 + phase * 2.3);
-    return Math.max(0.04, Math.min(0.96, trend + wave + micro));
+    noise = noise * 0.86 + (random() - 0.5) * 0.9;
+    const wave =
+      4.6 * Math.sin(Math.PI * 2 * (cycles * t + phase)) +
+      1.35 * Math.sin(Math.PI * 2 * (6.2 * t + phase * 0.7));
+    const price = 100 + wave + noise;
+    return Math.round(Math.max(78, Math.min(122, price)) * 100) / 100;
   });
 }
 
@@ -72,18 +100,51 @@ export function createCountFlash(seed: number): CountFlashState {
   };
 }
 
-export function createMarketTrade(seed: number): MarketTradeState {
+export function marketBand(
+  prices: number[],
+  ratio: number,
+): { low: number; high: number; min: number; max: number } {
+  const sorted = [...prices].sort((left, right) => left - right);
+  const min = sorted[0] ?? 0;
+  const max = sorted[sorted.length - 1] ?? min;
+  const span = Math.max(0.01, max - min);
+  const lowIndex = Math.max(0, Math.floor(sorted.length * ratio) - 1);
+  const highIndex = Math.min(
+    sorted.length - 1,
+    Math.ceil(sorted.length * (1 - ratio)),
+  );
+  return {
+    low: sorted[lowIndex] ?? min,
+    high: sorted[highIndex] ?? max,
+    min,
+    max: min + span,
+  };
+}
+
+export function createMarketTrade(
+  seed: number,
+  mode: MarketTradeState["mode"] = "single",
+): MarketTradeState {
   const width = 360;
   const height = 156;
   const prices = marketPrices(seed);
-  const extremes = extremeIndices(prices);
+  const profitPct = 5 + (seed % 11);
   return {
     seed,
     width,
     height,
     prices,
-    buyIndex: extremes.low,
-    sellIndex: extremes.high,
+    mode,
+    sampleMs: 250,
+    durationMs: 15_000,
+    buyBandRatio: 0.16,
+    sellBandRatio: 0.16,
+    ...(mode === "target"
+      ? {
+          initialCapital: 1_000,
+          targetCapital: 1_000 + profitPct * 10,
+        }
+      : {}),
   };
 }
 
@@ -98,21 +159,63 @@ export function validPatternSelection(
   );
 }
 
+export function marketCapital(
+  prices: number[],
+  trades: Array<{ buyIndex: number; sellIndex: number }>,
+  initialCapital: number,
+): number {
+  return trades.reduce((capital, trade) => {
+    const buy = prices[trade.buyIndex];
+    const sell = prices[trade.sellIndex];
+    if (buy === undefined || sell === undefined || buy <= 0) {
+      return capital;
+    }
+    return capital * (sell / buy);
+  }, initialCapital);
+}
+
 export function validMarketChoice(
   market: MarketTradeState,
-  buyIndex: number | undefined,
-  sellIndex: number | undefined,
+  trades: Array<{ buyIndex: number; sellIndex: number }> | undefined,
 ): boolean {
-  if (
-    buyIndex === undefined ||
-    sellIndex === undefined ||
-    buyIndex < 0 ||
-    sellIndex < 0 ||
-    buyIndex >= market.prices.length ||
-    sellIndex >= market.prices.length ||
-    buyIndex >= sellIndex
-  ) {
+  if (!trades || trades.length === 0) {
     return false;
   }
-  return Math.abs(buyIndex - market.buyIndex) <= 3 && Math.abs(sellIndex - market.sellIndex) <= 3;
+  let previousSell = -1;
+  for (const trade of trades) {
+    const { buyIndex, sellIndex } = trade;
+    if (
+      buyIndex < 0 ||
+      sellIndex < 0 ||
+      buyIndex >= market.prices.length ||
+      sellIndex >= market.prices.length ||
+      buyIndex >= sellIndex ||
+      buyIndex <= previousSell
+    ) {
+      return false;
+    }
+    previousSell = sellIndex;
+  }
+
+  const buyBand = marketBand(market.prices, market.buyBandRatio);
+  const sellBand = marketBand(market.prices, market.sellBandRatio);
+  if (market.mode === "single") {
+    const trade = trades[0];
+    if (!trade) {
+      return false;
+    }
+    const buy = market.prices[trade.buyIndex] ?? Number.POSITIVE_INFINITY;
+    const sell = market.prices[trade.sellIndex] ?? Number.NEGATIVE_INFINITY;
+    return trades.length === 1 && buy <= buyBand.low && sell >= sellBand.high;
+  }
+
+  const initial = market.initialCapital ?? 1_000;
+  for (const trade of trades) {
+    const buy = market.prices[trade.buyIndex] ?? Number.POSITIVE_INFINITY;
+    const sell = market.prices[trade.sellIndex] ?? Number.NEGATIVE_INFINITY;
+    if (buy > buyBand.low || sell < sellBand.high) {
+      return false;
+    }
+  }
+  return marketCapital(market.prices, trades, initial) >= (market.targetCapital ?? initial);
 }

@@ -64,9 +64,11 @@ function iconNodeSvg(node: IconNode, color: string): string {
     .join("");
 }
 
-export function createGrid(): GridState {
-  const targetKey = ICON_KEYS[randomInt(0, ICON_KEYS.length)] ?? "cat";
-  const targetCount = randomInt(2, 5);
+export function createGrid(preview = false): GridState {
+  const targetKey = preview
+    ? "trophy"
+    : (ICON_KEYS[randomInt(0, ICON_KEYS.length)] ?? "cat");
+  const targetCount = preview ? 2 : randomInt(2, 5);
   const items = Array.from({ length: targetCount }, () => targetKey);
   const distractors = ICON_KEYS.filter((key) => key !== targetKey);
   shuffle(distractors);

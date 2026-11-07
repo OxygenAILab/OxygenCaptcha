@@ -47,7 +47,7 @@ def assert_no_horizontal_overflow(page: Page) -> None:
 def embed_url(challenge_type: str) -> str:
     return (
         f"{BASE}/embed?sitekey={SITE_KEY}&action=submit"
-        f"&parentOrigin={BASE}&challengeType={challenge_type}"
+        f"&parentOrigin={BASE}&challengeType={challenge_type}&launch=1"
     )
 
 
@@ -83,7 +83,8 @@ with sync_playwright() as playwright:
         page.locator(f'[data-language="{target}"]').click()
         switched = page.locator("h1").inner_text()
         assert ("Verify behavior" in switched) if target == "en" else ("验证行为" in switched)
-        assert page.locator(".hero-media").evaluate("(image) => image.naturalWidth") > 0
+        assert page.locator(".hero-media").count() == 0
+        assert page.locator(".hero-signal").is_visible()
         assert_no_horizontal_overflow(page)
         page.screenshot(
             path=str(OUT / f"production-{viewport_name}-official-site.png"),
@@ -97,7 +98,10 @@ with sync_playwright() as playwright:
         reduced_motion="no-preference",
     )
     captcha.goto(f"{BASE}/captcha", wait_until="networkidle")
-    captcha.locator(".oc-shell").wait_for()
+    captcha.locator("#oc-entry-check").wait_for()
+    captcha.screenshot(path=str(OUT / "production-captcha-entry.png"), full_page=True)
+    captcha.locator("#oc-entry-check").click()
+    captcha.locator(".oc-card").wait_for(timeout=10_000)
     assert captcha.locator("body").get_attribute("data-challenge-type")
     captcha.screenshot(path=str(OUT / "production-captcha-random.png"), full_page=True)
     assert not captcha_errors, captcha_errors
@@ -108,7 +112,10 @@ with sync_playwright() as playwright:
     human.locator("#oc-human-check").click()
     human.wait_for_timeout(minimum + 250)
     human.locator("#oc-submit").click()
-    wait_for_status(human, "验证成功")
+    human.wait_for_function(
+        "() => document.querySelector('.oc-entry-label')?.textContent.includes('验证通过')",
+        timeout=15_000,
+    )
     human.screenshot(path=str(OUT / "production-human-success.png"), full_page=True)
     assert not human_errors, human_errors
 
@@ -121,7 +128,10 @@ with sync_playwright() as playwright:
         }"""
     )
     rotate.locator("#oc-submit").click()
-    wait_for_status(rotate, "验证成功")
+    rotate.wait_for_function(
+        "() => document.querySelector('.oc-entry-label')?.textContent.includes('验证通过')",
+        timeout=15_000,
+    )
     rotate.screenshot(path=str(OUT / "production-rotate-success.png"), full_page=True)
     assert not rotate_errors, rotate_errors
 
@@ -173,12 +183,26 @@ with sync_playwright() as playwright:
 
     platform, platform_errors = open_page(browser, {"width": 900, "height": 760})
     platform.goto(f"{BASE}/platform", wait_until="networkidle")
-    assert platform.locator(".login-card").is_visible()
+    assert platform.locator(".login-view").is_visible()
     platform.locator('a[href="/auth/login"]').click()
     platform.wait_for_load_state("domcontentloaded")
     assert "account.oxygenai.top" in platform.url
     platform.screenshot(path=str(OUT / "production-oauth-login.png"), full_page=True)
     assert not platform_errors, platform_errors
+
+    for path, heading in (
+        ("/privacy-policy", "隐私政策"),
+        ("/user-agreement", "用户协议"),
+    ):
+        legal, legal_errors = open_page(browser, {"width": 900, "height": 760})
+        legal.goto(f"{BASE}{path}", wait_until="networkidle")
+        assert legal.locator("#legal-title").inner_text() == heading
+        assert_no_horizontal_overflow(legal)
+        legal.screenshot(
+            path=str(OUT / f"production-{path.strip('/')}.png"),
+            full_page=True,
+        )
+        assert not legal_errors, legal_errors
 
     browser.close()
 

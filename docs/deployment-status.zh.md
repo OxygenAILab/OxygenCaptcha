@@ -1,6 +1,6 @@
 # 部署状态
 
-当前版本：`v26.0-alpha.4`
+当前版本：`v26.0-alpha.5`
 
 ## 已完成
 
@@ -15,7 +15,7 @@
   `Host: captcha.oxygenai.top`，均返回健康。
 - 使用 `curl --resolve captcha.oxygenai.top:443:154.219.110.138` 验证了目标域名路由、
   `/embed` 的诱饵文本、SVG overlay 和 `frame.js` 引用。
-- `v26.0-alpha.4` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
+- `v26.0-alpha.5` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
   low/medium/high/critical 风险步数。
 - 官网 `/`、随机挑战 `/captcha`、`/platform` 和 OxygenAccount OAuth 入口均已上线；
   官网顶部横幅会自动识别语言并支持中英文切换。
@@ -23,8 +23,8 @@
   已归档；`main`、开发分支和签名 tag `v26.0-alpha.4` 均已推送。
 - OxygenAccount OAuth 已完成真实端到端回归：登录、授权、回调、开放平台会话与昵称资料
   均成功，头像字段在资料存在时展示。
-- 远程 Playwright 在桌面与 390px 视口验证官网、随机挑战、基础交互、Turnstile 组件、
-  麦克风/摄像头权限替代、开放平台和跨域 Web Component。
+- 远程 Playwright 在桌面与 390px 视口验证纯色官网、紧凑入口、无会话随机挑战、
+  Turnstile 组件、麦克风/摄像头权限替代、法律页面、开放平台和跨域 Web Component。
 - 手部动作使用本地 vendored MediaPipe Hand Landmarker；模型完整性为
   `7,819,105` bytes，SHA-256 `FBC2A30080C3C557093B5DDFC334698132EB341044CCEE322CCF8BCF3607CDE1`。
 - 部署脚本已改为显式 `systemctl restart`，避免运行中的 systemd 服务继续执行旧版本。
@@ -53,5 +53,8 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
 - 2026-11-07：`v26.0-alpha.3` 九题型、风险会话和新增微型游戏部署完成。
 - 2026-11-07：`v26.0-alpha.4` 十五题型、Cloudflare Turnstile、MediaPipe 手部动作、
   声学波形、风险画像和 OxygenAccount 开放平台部署完成，公网回归通过。
+- 2026-11-08：`v26.0-alpha.5` 部署完成。新增紧凑入口/成功收起、约 2% 公开预览、
+  更长持续覆盖、滚动市场与目标本金、移动设备题型过滤、实用无障碍换题、开放平台
+  工作台 UI、官网纯色首屏、双语隐私政策和用户协议；生产环境变量原样保留。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->

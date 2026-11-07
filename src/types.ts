@@ -56,12 +56,48 @@ export type MotionState = {
   width: number;
   height: number;
   durationMs: number;
+  requiredCoverageMs: number;
+  targetRadius: number;
 };
 
 export type AudioSequenceState = {
-  animals: Array<"cat" | "dog" | "bird">;
-  answerKey: "cat" | "dog" | "bird";
-  options: Array<{ key: "cat" | "dog" | "bird"; label: string }>;
+  animals: Array<
+    | "cat"
+    | "dog"
+    | "bird"
+    | "monkey"
+    | "horse"
+    | "snake"
+    | "bear"
+    | "mouse"
+    | "elephant"
+    | "seal"
+  >;
+  answerKey:
+    | "cat"
+    | "dog"
+    | "bird"
+    | "monkey"
+    | "horse"
+    | "snake"
+    | "bear"
+    | "mouse"
+    | "elephant"
+    | "seal";
+  options: Array<{
+    key:
+      | "cat"
+      | "dog"
+      | "bird"
+      | "monkey"
+      | "horse"
+      | "snake"
+      | "bear"
+      | "mouse"
+      | "elephant"
+      | "seal";
+    label: string;
+  }>;
 };
 
 export type CalculationState = {
@@ -72,6 +108,8 @@ export type CalculationState = {
 export type KeyPointerState = {
   requiredDistance: number;
   requiredHoldMs: number;
+  requiredKey: string;
+  requiredKeyLabel: string;
 };
 
 export type PatternMemoryState = {
@@ -85,13 +123,20 @@ export type CountFlashState = {
   revealMs: number;
 };
 
+export type MarketTradeMode = "single" | "target";
+
 export type MarketTradeState = {
   seed: number;
   width: number;
   height: number;
   prices: number[];
-  buyIndex: number;
-  sellIndex: number;
+  mode: MarketTradeMode;
+  sampleMs: number;
+  durationMs: number;
+  buyBandRatio: number;
+  sellBandRatio: number;
+  initialCapital?: number;
+  targetCapital?: number;
 };
 
 export type HumanCheckState = {
@@ -113,7 +158,17 @@ export type TurnstileState = {
   siteKey: string;
 };
 
-export type HandMotionAction = "open" | "fist" | "peace";
+export type HandMotionAction =
+  | "open"
+  | "fist"
+  | "peace"
+  | "thumb_up"
+  | "thumb_down"
+  | "point_up"
+  | "ok"
+  | "call_me"
+  | "l_sign"
+  | "pinky";
 
 export type HandMotionState = {
   sequence: HandMotionAction[];
@@ -141,15 +196,17 @@ export type ChallengeEvidence = {
   dwellMs?: number;
   angle?: number;
   turnstilePassed?: boolean;
+  coverageMs?: number;
+  keyCode?: string;
   handGestures?: Array<{
     action: HandMotionAction;
     durationMs: number;
   }>;
   audioTakes?: number[][][];
-  market?: {
+  marketTrades?: Array<{
     buyIndex: number;
     sellIndex: number;
-  };
+  }>;
   point?: {
     x: number;
     y: number;
@@ -184,6 +241,9 @@ export type ChallengeState = {
   stepIndex?: number;
   totalSteps?: number;
   risk?: RiskLevel;
+  preview?: boolean;
+  deviceClass?: DeviceClass;
+  swapAllowed?: boolean;
   parentOrigin: string | null;
   createdAt: number;
   expiresAt: number;
@@ -205,6 +265,14 @@ export type ChallengeReceipt = {
   expiresAt: string;
 };
 
+export type ChallengePreviewReceipt = {
+  verified: true;
+  preview: true;
+  action: string;
+  siteKey: string;
+  type: ChallengeType;
+};
+
 export type ChallengeSessionState = {
   id: string;
   siteKey: string;
@@ -219,6 +287,8 @@ export type ChallengeSessionState = {
   expiresAt: number;
   completed: boolean;
   testMode: boolean;
+  deviceClass: DeviceClass;
+  swapsRemaining: number;
 };
 
 export type ChallengeFailure = {
@@ -232,6 +302,9 @@ export type ChallengeFailure = {
     | "ATTEMPTS_EXHAUSTED"
     | "CHALLENGE_EXPIRED"
     | "CHALLENGE_USED"
-    | "CHALLENGE_NOT_FOUND";
+    | "CHALLENGE_NOT_FOUND"
+    | "SWAP_NOT_ALLOWED";
   remainingAttempts?: number;
 };
+
+export type DeviceClass = "desktop" | "mobile";

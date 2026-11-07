@@ -13,6 +13,7 @@ import { loadConfig } from "./config.js";
 import { renderGridItemSvg, renderTargetSvg } from "./grid.js";
 import { registerPlatform } from "./platform.js";
 import { PlatformStore } from "./platform-store.js";
+import { legalPageHtml } from "./legal.js";
 import { clientIp, RiskTracker } from "./risk.js";
 import { renderChallengeSvg } from "./render.js";
 import {
@@ -23,7 +24,7 @@ import {
   siteAllowsOrigin,
 } from "./site.js";
 import { TokenService } from "./token.js";
-import type { AppConfig, ChallengeState } from "./types.js";
+import type { AppConfig, ChallengeState, HandMotionAction } from "./types.js";
 import { officialSiteHtml } from "./web.js";
 import { verifyTurnstile } from "./turnstile.js";
 
@@ -62,6 +63,17 @@ const verifySchema = z.object({
   selectedIndices: z.array(z.number().int().min(0).max(8)).max(9).optional(),
   holdMs: z.number().int().min(0).max(9_000).optional(),
   distance: z.number().min(0).max(1_200).optional(),
+  keyCode: z.string().min(1).max(32).optional(),
+  coverageMs: z.number().int().min(0).max(30_000).optional(),
+  marketTrades: z
+    .array(
+      z.object({
+        buyIndex: z.number().int().min(0).max(200),
+        sellIndex: z.number().int().min(0).max(200),
+      }),
+    )
+    .max(30)
+    .optional(),
   market: z
     .object({
       buyIndex: z.number().int().min(0).max(200),
@@ -74,11 +86,22 @@ const verifySchema = z.object({
   handGestures: z
     .array(
       z.object({
-        action: z.enum(["open", "fist", "peace"]),
+        action: z.enum([
+          "open",
+          "fist",
+          "peace",
+          "thumb_up",
+          "thumb_down",
+          "point_up",
+          "ok",
+          "call_me",
+          "l_sign",
+          "pinky",
+        ]),
         durationMs: z.number().int().min(0).max(5_000),
       }),
     )
-    .max(4)
+    .max(6)
     .optional(),
   audioTakes: z
     .array(z.array(z.array(z.number().min(-8).max(8)).max(8)).max(160))
@@ -88,7 +111,7 @@ const verifySchema = z.object({
     .object({
       x: z.number().finite(),
       y: z.number().finite(),
-      elapsedMs: z.number().int().min(0).max(9_000),
+      elapsedMs: z.number().int().min(0).max(25_000),
     })
     .optional(),
 });
@@ -101,10 +124,15 @@ const embedSchema = z.object({
   challengeType: z.enum(CHALLENGE_TYPES).optional(),
   risk: z.enum(RISK_LEVELS).optional(),
   steps: z.coerce.number().int().min(1).max(8).optional(),
+  launch: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   accessible: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   test: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
 }).refine((value) => Boolean(value.sitekey || value.session), {
   message: "sitekey or session is required",
+});
+
+const swapSchema = z.object({
+  accessible: z.boolean().optional().default(false),
 });
 
 const siteverifySchema = z.object({
@@ -127,6 +155,18 @@ function apiVersionAllowed(request: FastifyRequest): boolean {
   return requested === undefined || requested === API_VERSION || requested === `v${API_VERSION}`;
 }
 
+function deviceClassFor(request: FastifyRequest): "desktop" | "mobile" {
+  const mobileHint = String(request.headers["sec-ch-ua-mobile"] ?? "");
+  const userAgent = String(request.headers["user-agent"] ?? "");
+  if (
+    mobileHint === "?1" ||
+    /Android|iPhone|iPad|iPod|Mobile|Tablet|HarmonyOS/i.test(userAgent)
+  ) {
+    return "mobile";
+  }
+  return "desktop";
+}
+
 function highlightedText(value: string, targets: string[]): string {
   if (targets.length === 0) {
     return escapeHtml(value);
@@ -142,6 +182,22 @@ function highlightedText(value: string, targets: string[]): string {
       targets.includes(part) ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part),
     )
     .join("");
+}
+
+function gestureLabel(action: HandMotionAction): string {
+  const labels: Record<string, string> = {
+    open: "张开手掌",
+    fist: "握拳",
+    peace: "剪刀手",
+    thumb_up: "竖起拇指",
+    thumb_down: "拇指向下",
+    point_up: "食指向上",
+    ok: "OK 手势",
+    call_me: "六字手势",
+    l_sign: "L 形手势",
+    pinky: "小指向上",
+  };
+  return labels[action] ?? "指定手势";
 }
 
 function apiBase(config: AppConfig): string {
@@ -168,6 +224,9 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
     step: (state.stepIndex ?? 0) + 1,
     totalSteps: state.totalSteps ?? 1,
     risk: state.risk ?? "low",
+    deviceClass: state.deviceClass ?? "desktop",
+    preview: state.preview === true,
+    swapAllowed: state.swapAllowed === true,
     expiresAt: new Date(state.expiresAt).toISOString(),
     maxAttempts: state.maxAttempts,
   };
@@ -216,9 +275,11 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
   if (state.type === "key_pointer" && state.keyPointer) {
     return {
       ...common,
-      prompt: "按住空格键，同时向右拖动滑块并保持片刻",
+      prompt: `按住 ${state.keyPointer.requiredKeyLabel} 键，同时向右拖动滑块并保持片刻`,
       requiredDistance: state.keyPointer.requiredDistance,
       requiredHoldMs: state.keyPointer.requiredHoldMs,
+      requiredKey: state.keyPointer.requiredKey,
+      requiredKeyLabel: state.keyPointer.requiredKeyLabel,
     };
   }
 
@@ -247,11 +308,19 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
   if (state.type === "market_trade" && state.marketTrade) {
     return {
       ...common,
-      prompt: "在低点买入，在高点卖出",
+      prompt:
+        state.marketTrade.mode === "target"
+          ? "反复买入和卖出，直到资产达到目标"
+          : "在价格低位买入，并在随后价格高位卖出",
       market: {
         seed: state.marketTrade.seed,
         width: state.marketTrade.width,
         height: state.marketTrade.height,
+        mode: state.marketTrade.mode,
+        sampleMs: state.marketTrade.sampleMs,
+        durationMs: state.marketTrade.durationMs,
+        initialCapital: state.marketTrade.initialCapital,
+        targetCapital: state.marketTrade.targetCapital,
       },
     };
   }
@@ -303,7 +372,7 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
   if (state.type === "speech_wave" && state.speechWave) {
     return {
       ...common,
-      prompt: "朗读三遍，重点比较高亮词的声学一致性",
+      prompt: "保持环境安静，完整朗读三遍",
       speechWave: {
         phrase: state.speechWave.phrase,
         targetWords: state.speechWave.targetWords,
@@ -332,7 +401,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
         (_, index) => `
           <button class="oc-tile" type="button" data-index="${index}" aria-label="第 ${index + 1} 个图标" aria-pressed="false">
             <img src="${base}/v1/challenges/${id}/tile/${index}.svg" alt="" draggable="false">
-            <span class="oc-tile-check" aria-hidden="true">✓</span>
+            <span class="oc-tile-check" aria-hidden="true"></span>
           </button>`,
       )
       .join("");
@@ -354,15 +423,15 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">动态覆盖</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">拖动下方的圆形遮罩，覆盖画面中的蓝色移动目标</p>
         </div>
         <span class="oc-motion-badge">实时</span>
       </div>
-      <div class="oc-motion-wrap" data-width="${state.motion.width}" data-height="${state.motion.height}" data-seed="${state.motion.seed}" data-duration="${state.motion.durationMs}">
+      <div class="oc-motion-wrap" data-width="${state.motion.width}" data-height="${state.motion.height}" data-seed="${state.motion.seed}" data-duration="${state.motion.durationMs}" data-required-coverage="${state.motion.requiredCoverageMs}" data-target-radius="${state.motion.targetRadius}">
         <canvas id="oc-motion-canvas" width="${state.motion.width}" height="${state.motion.height}" aria-label="移动目标覆盖区域"></canvas>
       </div>
-      <p class="oc-helper" id="oc-motion-help">按住并拖动遮罩，持续覆盖目标片刻。</p>
+      <p class="oc-helper" id="oc-motion-help">持续覆盖目标，直到验证按钮可用。</p>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
       </div>`;
@@ -382,10 +451,10 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">听觉序列</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">听音频，选择猫叫之后的第一个动物</p>
         </div>
-        <span class="oc-difficulty">声音</span>
+        <span class="oc-difficulty">音频</span>
       </div>
       <button class="oc-media-button" id="oc-play-sequence" type="button">
         <span class="oc-media-icon" aria-hidden="true"></span>
@@ -401,10 +470,10 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">计算挑战</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">计算下列算式</p>
         </div>
-        <span class="oc-difficulty">高成本</span>
+        <span class="oc-difficulty">计算</span>
       </div>
       <div class="oc-expression" id="oc-expression">${escapeHtml(state.calculation.expression)}</div>
       <div class="oc-controls">
@@ -421,15 +490,15 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">双输入验证</p>
-          <p class="oc-prompt" id="oc-prompt">按住空格键，同时向右拖动</p>
+          <p class="oc-kicker">安全验证</p>
+          <p class="oc-prompt" id="oc-prompt">按住 ${escapeHtml(state.keyPointer.requiredKeyLabel)} 键，同时向右拖动</p>
         </div>
-        <span class="oc-difficulty">键盘 + 指针</span>
+        <span class="oc-difficulty">组合操作</span>
       </div>
-      <div class="oc-gesture-wrap" data-required-distance="${state.keyPointer.requiredDistance}" data-required-hold="${state.keyPointer.requiredHoldMs}">
-        <div class="oc-keycap" aria-hidden="true">Space</div>
+      <div class="oc-gesture-wrap" data-required-distance="${state.keyPointer.requiredDistance}" data-required-hold="${state.keyPointer.requiredHoldMs}" data-required-key="${escapeHtml(state.keyPointer.requiredKey)}" data-required-key-label="${escapeHtml(state.keyPointer.requiredKeyLabel)}">
+        <div class="oc-keycap" aria-hidden="true">${escapeHtml(state.keyPointer.requiredKeyLabel)}</div>
         <div class="oc-gesture-track" id="oc-gesture-track" role="slider" tabindex="0"
-             aria-label="按住空格键并拖到右侧" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+             aria-label="按住 ${escapeHtml(state.keyPointer.requiredKeyLabel)} 键并拖到右侧" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <span class="oc-gesture-fill"></span>
           <span class="oc-gesture-knob"></span>
         </div>
@@ -448,7 +517,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">序列记忆</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">看一遍闪烁顺序，再按相同顺序点击</p>
         </div>
         <span class="oc-difficulty">${state.patternMemory.sequenceLength} 步</span>
@@ -470,10 +539,10 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">瞬时计数</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">记住画面短暂出现的圆点数量</p>
         </div>
-        <span class="oc-difficulty">约 1 秒</span>
+        <span class="oc-difficulty">观察</span>
       </div>
       <div class="oc-count-wrap">
         <canvas id="oc-count-canvas" width="360" height="170"
@@ -496,24 +565,32 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
   }
 
   if (state.type === "market_trade" && state.marketTrade) {
+    const targetMode = state.marketTrade.mode === "target";
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">市场时机</p>
-          <p class="oc-prompt" id="oc-prompt">在低点买入，在高点卖出</p>
+          <p class="oc-kicker">安全验证</p>
+          <p class="oc-prompt" id="oc-prompt">${targetMode ? "反复交易，直到资产达到目标" : "选择一次买入和卖出时机"}</p>
         </div>
-        <span class="oc-difficulty">微型游戏</span>
+        <span class="oc-difficulty">${targetMode ? "目标模式" : "单次交易"}</span>
       </div>
       <div class="oc-market-wrap">
         <canvas id="oc-market-canvas" width="${state.marketTrade.width}" height="${state.marketTrade.height}"
                 data-seed="${state.marketTrade.seed}"
+                data-version="2"
+                data-mode="${state.marketTrade.mode}"
+                data-sample-ms="${state.marketTrade.sampleMs}"
+                data-duration="${state.marketTrade.durationMs}"
+                data-initial-capital="${state.marketTrade.initialCapital ?? 1000}"
+                data-target-capital="${state.marketTrade.targetCapital ?? 0}"
                 aria-label="股票价格走势图"></canvas>
       </div>
+      <div class="oc-market-summary" id="oc-market-summary">${targetMode ? `<span>本金 <strong id="oc-market-capital">${state.marketTrade.initialCapital ?? 1000}</strong></span><span>目标 <strong>${state.marketTrade.targetCapital ?? 0}</strong></span>` : "<span>等待价格走势</span>"}</div>
       <div class="oc-trade-actions" role="group" aria-label="交易方向">
         <button class="oc-trade-button is-active" id="oc-market-buy" type="button" aria-pressed="true">买入</button>
         <button class="oc-trade-button" id="oc-market-sell" type="button" aria-pressed="false">卖出</button>
       </div>
-      <p class="oc-helper" id="oc-market-help">先在图表上选择买入点，再选择卖出点。</p>
+      <p class="oc-helper" id="oc-market-help">在图表上选择交易时机。</p>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
       </div>`;
@@ -523,7 +600,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">基础验证</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">确认你不是自动程序</p>
         </div>
         <span class="oc-difficulty">基础</span>
@@ -545,7 +622,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">方向校准</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">旋转图形，使其回到正方向</p>
         </div>
         <span class="oc-difficulty">基础</span>
@@ -578,7 +655,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">基础判断</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">${escapeHtml(state.semanticPick.question)}</p>
         </div>
         <span class="oc-difficulty">基础</span>
@@ -593,10 +670,10 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">Cloudflare 安全验证</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">完成人机验证后继续</p>
         </div>
-        <span class="oc-difficulty">Turnstile</span>
+        <span class="oc-difficulty">托管验证</span>
       </div>
       <div class="oc-turnstile-shell">
         <div id="oc-turnstile" data-sitekey="${escapeHtml(state.turnstile.siteKey)}" data-language="zh-CN"></div>
@@ -610,16 +687,16 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     const sequence = state.handMotion.sequence
       .map(
         (action, index) =>
-          `<span class="oc-action-chip" data-action="${escapeHtml(action)}">${index + 1}. ${action === "open" ? "张开手掌" : action === "fist" ? "握拳" : "剪刀手"}</span>`,
+          `<span class="oc-action-chip" data-action="${escapeHtml(action)}">${index + 1}. ${gestureLabel(action)}</span>`,
       )
       .join("");
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">摄像头动态验证</p>
+          <p class="oc-kicker">安全验证</p>
           <p class="oc-prompt" id="oc-prompt">按顺序完成动作，每个动作保持片刻</p>
         </div>
-        <span class="oc-difficulty">WebCam</span>
+        <span class="oc-difficulty">动态动作</span>
       </div>
       <div class="oc-camera-wrap">
         <video id="oc-hand-video" playsinline muted></video>
@@ -631,7 +708,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
         <span class="oc-media-icon" aria-hidden="true"></span>
         <span>启用摄像头并开始</span>
       </button>
-      <p class="oc-helper" id="oc-hand-help">视频帧只在设备本地处理，不上传原始画面。</p>
+      <p class="oc-helper" id="oc-hand-help">请让手部完整出现在画面中。</p>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
       </div>`;
@@ -646,8 +723,8 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     return `
       <div class="oc-prompt-row">
         <div>
-          <p class="oc-kicker">麦克风声学验证</p>
-          <p class="oc-prompt" id="oc-prompt">完整朗读三遍，比较高亮词的声学一致性</p>
+          <p class="oc-kicker">安全验证</p>
+          <p class="oc-prompt" id="oc-prompt">保持自然语速，完整朗读三遍</p>
         </div>
         <span class="oc-difficulty">${state.speechWave.takeCount} 遍</span>
       </div>
@@ -661,7 +738,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
         <span class="oc-media-icon" aria-hidden="true"></span>
         <span>录制第 1 遍</span>
       </button>
-      <p class="oc-helper" id="oc-speech-help">原始音频不离开设备，只提交频段特征。</p>
+      <p class="oc-helper" id="oc-speech-help">请在安静环境中按原句朗读。</p>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
       </div>`;
@@ -672,7 +749,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
   return `
     <div class="oc-prompt-row">
       <div>
-        <p class="oc-kicker">反色遮挡</p>
+        <p class="oc-kicker">安全验证</p>
         <p class="oc-prompt" id="oc-prompt">输入图片中的六位数字</p>
       </div>
       <span class="oc-difficulty">6 位</span>
@@ -704,7 +781,7 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
   <script defer src="${escapeHtml(apiBase(config))}/frame.js"></script>
 </head>
 <body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}">
-  <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}">
+  <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}" data-preview="${state.preview ? "1" : "0"}" data-swap-allowed="${state.swapAllowed ? "1" : "0"}">
     <form class="oc-card" id="oc-form" novalidate>
       <header class="oc-header">
         <div class="oc-brand">
@@ -714,14 +791,23 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
         <div class="oc-tools">
           ${state.type === "inverse_occlusion" ? `
           <button class="oc-icon-button" id="oc-audio" type="button" aria-label="播放听觉验证码" title="播放听觉验证码"></button>` : ""}
+          ${
+            state.preview || state.swapAllowed
+              ? `
           <button class="oc-icon-button" id="oc-refresh" type="button" aria-label="换一道挑战" title="换一道挑战"></button>
+          `
+              : ""
+          }
         </div>
       </header>
       <div class="oc-challenge">
         ${challengeBody(state, config)}
       </div>
       <footer class="oc-footer">
-        <span class="oc-brand-note">安全验证由 OxygenChallenge 提供</span>
+        <div class="oc-legal">
+          <span class="oc-brand-note">安全验证由 OxygenChallenge 提供</span>
+          <p>与此 Captcha 交互即代表您同意我们的<a href="${escapeHtml(apiBase(config))}/privacy-policy" target="_blank" rel="noopener noreferrer">隐私政策</a>和<a href="${escapeHtml(apiBase(config))}/user-agreement" target="_blank" rel="noopener noreferrer">用户条款</a></p>
+        </div>
         <div class="oc-footer-actions">
           <button class="oc-text-button" id="oc-accessible" type="button" aria-label="切换到无障碍验证">无障碍验证</button>
           <span class="oc-progress">${(state.stepIndex ?? 0) + 1} / ${state.totalSteps ?? 1}</span>
@@ -737,6 +823,48 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
 
 function errorPage(status: number, message: string): string {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OxygenChallenge</title></head><body style="margin:0;background:#111827;color:#eee7d8;font:16px system-ui;padding:24px"><p>HTTP ${status}</p><h1>${escapeHtml(message)}</h1></body></html>`;
+}
+
+function entryHtml(
+  state: {
+    siteKey: string;
+    action: string;
+    parentOrigin: string | null;
+    sessionId: string | undefined;
+    accessible: boolean;
+    testMode: boolean;
+  },
+  config: AppConfig,
+): string {
+  const base = escapeHtml(apiBase(config));
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>OxygenChallenge</title>
+  <link rel="stylesheet" href="${base}/widget.css">
+  <script defer src="${base}/frame.js"></script>
+</head>
+<body class="oc-frame oc-entry-page" data-entry="1" data-challenge-type="entry" data-test-mode="${state.testMode ? "1" : "0"}">
+  <main class="oc-shell oc-entry-shell" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(state.parentOrigin ?? "")}" data-accessible="${state.accessible ? "1" : "0"}">
+    <section class="oc-entry" aria-label="OxygenChallenge">
+      <div class="oc-entry-bar">
+        <button class="oc-entry-check" id="oc-entry-check" type="button" aria-label="我是人类">
+          <span class="oc-entry-check-box" aria-hidden="true"></span>
+          <span class="oc-entry-spinner" aria-hidden="true"></span>
+        </button>
+        <span class="oc-entry-label" id="oc-entry-label">我是人类</span>
+        <img class="oc-entry-mark" src="${base}/oxygenmark.png" alt="Oxygen">
+      </div>
+      <div class="oc-entry-brand">
+        <span>Oxygen Challenge</span>
+        <button class="oc-entry-accessibility" id="oc-entry-accessibility" type="button">无障碍验证</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>`;
 }
 
 export type BuildAppOptions = {
@@ -855,9 +983,25 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     return reply.send(officialSiteHtml(config));
   });
 
+  for (const [path, kind] of [
+    ["/privacy-policy", "privacy"],
+    ["/user-agreement", "terms"],
+  ] as const) {
+    app.get(path, async (_request, reply) => {
+      reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "public, max-age=300")
+        .header(
+          "Content-Security-Policy",
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'none'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        );
+      return reply.send(legalPageHtml(config, kind));
+    });
+  }
+
   app.get("/v1/meta", async () => ({
       name: "OxygenChallenge",
-      version: "v26.0-alpha.4",
+      version: "v26.0-alpha.5",
       apiVersion: API_VERSION,
       mode: "api-and-open-platform",
       challengeTypes: CHALLENGE_TYPES,
@@ -877,19 +1021,35 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (!site) {
       return reply.code(503).type("text/html").send(errorPage(503, "验证服务尚未配置"));
     }
-    const risk = riskTracker.assess(
-      { headers: request.headers, ip: request.ip },
-      config.nodeEnv === "production",
-    );
-    const state = challenges.create(
+    const query = request.query as { launch?: string; accessible?: string };
+    const accessible = query.accessible === "1";
+    if (query.launch !== "1") {
+      reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow")
+        .header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
+        .header("Permissions-Policy", "camera=(self), microphone=(self)");
+      return reply.send(
+        entryHtml(
+          {
+            siteKey: site.key,
+            action: "submit",
+            parentOrigin: config.publicOrigin,
+            sessionId: undefined,
+            accessible,
+            testMode: false,
+          },
+          config,
+        ),
+      );
+    }
+    const state = challenges.createPreview(
       site.key,
       "submit",
       config.publicOrigin,
-      false,
-      undefined,
-      risk.level,
-      undefined,
-      config.nodeEnv !== "production",
+      deviceClassFor(request),
+      accessible,
     );
     reply
       .type("text/html; charset=utf-8")
@@ -988,6 +1148,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       parsed.data.challengeType,
       risk.level,
       parsed.data.steps,
+      false,
+      deviceClassFor(request),
     );
 
     reply.header("X-Oxygen-Challenge-Id", state.id);
@@ -1034,7 +1196,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       ...(parsed.data.selectedIndices ? { selectedIndices: parsed.data.selectedIndices } : {}),
       ...(parsed.data.holdMs !== undefined ? { holdMs: parsed.data.holdMs } : {}),
       ...(parsed.data.distance !== undefined ? { distance: parsed.data.distance } : {}),
-      ...(parsed.data.market ? { market: parsed.data.market } : {}),
+      ...(parsed.data.keyCode ? { keyCode: parsed.data.keyCode } : {}),
+      ...(parsed.data.coverageMs !== undefined
+        ? { coverageMs: parsed.data.coverageMs }
+        : {}),
+      ...(parsed.data.marketTrades
+        ? { marketTrades: parsed.data.marketTrades }
+        : parsed.data.market
+          ? { marketTrades: [parsed.data.market] }
+          : {}),
       ...(parsed.data.dwellMs !== undefined ? { dwellMs: parsed.data.dwellMs } : {}),
       ...(parsed.data.angle !== undefined ? { angle: parsed.data.angle } : {}),
       ...(parsed.data.handGestures ? { handGestures: parsed.data.handGestures } : {}),
@@ -1044,6 +1214,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     });
     logVerification(request, state, result);
     if (result.kind === "verified") {
+      return reply.send(result.receipt);
+    }
+    if (result.kind === "preview") {
       return reply.send(result.receipt);
     }
     if (result.kind === "step") {
@@ -1057,7 +1230,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         totalSteps: result.session.totalSteps,
         remainingSteps: result.session.totalSteps - result.session.currentStep,
         nextChallenge,
-        nextEmbedUrl: `${apiBase(config)}/embed?session=${encodeURIComponent(result.session.id)}${
+        nextEmbedUrl: `${apiBase(config)}/embed?session=${encodeURIComponent(result.session.id)}&launch=1${
           result.session.testMode && config.nodeEnv !== "production" ? "&test=1" : ""
         }`,
       });
@@ -1071,6 +1244,47 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
           ? 410
           : 200;
     return reply.code(status).send({ verified: false, code, ...("remainingAttempts" in result.failure ? { remainingAttempts: result.failure.remainingAttempts } : {}) });
+  });
+
+  app.post("/v1/challenges/:id/swap", async (request, reply) => {
+    const parsed = swapSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ swapped: false, code: "INVALID_REQUEST" });
+    }
+    const state = findState(challenges, request);
+    if (!state) {
+      return reply.code(404).send({ swapped: false, code: "CHALLENGE_NOT_FOUND" });
+    }
+    const result = challenges.swap(state.id, parsed.data.accessible);
+    if (result.kind === "failed") {
+      return reply.code(403).send({
+        swapped: false,
+        code: result.failure.code,
+      });
+    }
+    const swappedSession = result.sessionId
+      ? challenges.getSession(result.sessionId)
+      : undefined;
+    return {
+      swapped: true,
+      challengeId: result.state.id,
+      preview: result.state.preview === true,
+      type: result.state.type,
+      ...(result.state.preview
+        ? {}
+        : {
+            sessionId: result.sessionId,
+            nextEmbedUrl: `${apiBase(config)}/embed?session=${encodeURIComponent(
+              result.sessionId ?? "",
+            )}&launch=1${
+              swappedSession?.testMode && config.nodeEnv !== "production"
+                ? "&test=1"
+                : ""
+            }${
+              parsed.data.accessible ? "&accessible=1" : ""
+            }`,
+          }),
+    };
   });
 
   app.get("/v1/challenges/:id/overlay.svg", async (request, reply) => {
@@ -1159,6 +1373,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
 
     let testMode = parsed.data.test && config.nodeEnv !== "production";
     let state: ChallengeState | undefined;
+    let entry = {
+      siteKey: parsed.data.sitekey ?? "",
+      action: parsed.data.action,
+      parentOrigin: null as string | null,
+      sessionId: parsed.data.session,
+      accessible: parsed.data.accessible,
+      testMode,
+    };
     if (parsed.data.session) {
       const session = challenges.getSession(parsed.data.session);
       if (!session) {
@@ -1172,7 +1394,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         return reply.code(403).type("text/html").send(errorPage(403, "嵌入来源未授权"));
       }
       testMode = session.testMode && config.nodeEnv !== "production";
-      state = challenges.currentState(session.id);
+      entry = {
+        siteKey: session.siteKey,
+        action: session.action,
+        parentOrigin: session.parentOrigin,
+        sessionId: session.id,
+        accessible: parsed.data.accessible || session.accessible,
+        testMode,
+      };
+      if (parsed.data.launch) {
+        state = challenges.currentState(session.id);
+      }
     } else {
       const siteKey = parsed.data.sitekey;
       const site = siteKey ? getSite(config, siteKey) : undefined;
@@ -1191,6 +1423,23 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         requestedParent && siteAllowsOrigin(site, requestedParent) ? requestedParent : refererOrigin;
       if (!siteAllowsOrigin(site, parentOrigin)) {
         return reply.code(403).type("text/html").send(errorPage(403, "嵌入来源未授权"));
+      }
+      entry = {
+        siteKey,
+        action: parsed.data.action,
+        parentOrigin,
+        sessionId: undefined,
+        accessible: parsed.data.accessible,
+        testMode,
+      };
+      if (!parsed.data.launch) {
+        reply
+          .type("text/html; charset=utf-8")
+          .header("Cache-Control", "no-store")
+          .header("X-Robots-Tag", "noindex, nofollow")
+          .header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'self'")
+          .header("Permissions-Policy", "camera=(self), microphone=(self)");
+        return reply.send(entryHtml(entry, config));
       }
       if (
         parsed.data.challengeType === "turnstile" &&
@@ -1213,7 +1462,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         risk.level,
         parsed.data.steps,
         testMode,
+        deviceClassFor(request),
       );
+    }
+    if (!parsed.data.launch) {
+      reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow")
+        .header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'self'")
+        .header("Permissions-Policy", "camera=(self), microphone=(self)");
+      return reply.send(entryHtml(entry, config));
     }
     if (!state) {
       return reply.code(410).type("text/html").send(errorPage(410, "挑战已过期"));
@@ -1283,6 +1542,17 @@ function logVerification(
     request.log.info(
       { event: "challenge.verified", challengeId: state.id, siteKey: state.siteKey },
       "challenge verified",
+    );
+    return;
+  }
+  if (result.kind === "preview") {
+    request.log.info(
+      {
+        event: "challenge.preview_completed",
+        challengeId: state.id,
+        type: state.type,
+      },
+      "challenge preview completed",
     );
     return;
   }

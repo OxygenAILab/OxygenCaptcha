@@ -17,11 +17,14 @@ import type {
   AudioSequenceState,
   ChallengeEvidence,
   ChallengeFailure,
+  ChallengePreviewReceipt,
   ChallengeReceipt,
   ChallengeSessionState,
   ChallengeState,
   ChallengeType,
+  DeviceClass,
   HandMotionAction,
+  KeyPointerState,
   RiskLevel,
 } from "./types.js";
 import type { TokenService } from "./token.js";
@@ -39,6 +42,13 @@ const AUDIO_ANIMALS: Array<{ key: AnimalSound; label: string }> = [
   { key: "cat", label: "猫" },
   { key: "dog", label: "狗" },
   { key: "bird", label: "鸟" },
+  { key: "monkey", label: "猴子" },
+  { key: "horse", label: "马" },
+  { key: "snake", label: "蛇" },
+  { key: "bear", label: "熊" },
+  { key: "mouse", label: "鼠" },
+  { key: "elephant", label: "大象" },
+  { key: "seal", label: "海狮" },
 ];
 
 const SEMANTIC_QUESTIONS = [
@@ -74,7 +84,30 @@ const SEMANTIC_QUESTIONS = [
   },
 ] as const;
 
-const HAND_ACTIONS: HandMotionAction[] = ["open", "fist", "peace"];
+const HAND_ACTIONS: HandMotionAction[] = [
+  "open",
+  "fist",
+  "peace",
+  "thumb_up",
+  "thumb_down",
+  "point_up",
+  "ok",
+  "call_me",
+  "l_sign",
+  "pinky",
+];
+
+const KEY_OPTIONS: Array<{ code: string; label: string }> = [
+  { code: "Space", label: "空格" },
+  { code: "KeyA", label: "A" },
+  { code: "KeyD", label: "D" },
+  { code: "KeyF", label: "F" },
+  { code: "KeyJ", label: "J" },
+  { code: "KeyK", label: "K" },
+  { code: "KeyL", label: "L" },
+];
+
+export const PUBLIC_PREVIEW_RATIO = 0.02;
 
 const CHALLENGE_TYPES: ChallengeType[] = [
   "grid_select",
@@ -103,6 +136,7 @@ export const RISK_STEPS: Record<RiskLevel, number> = {
 
 export type VerificationResult =
   | { kind: "verified"; receipt: ChallengeReceipt; state: ChallengeState }
+  | { kind: "preview"; receipt: ChallengePreviewReceipt; state: ChallengeState }
   | {
       kind: "step";
       state: ChallengeState;
@@ -110,6 +144,10 @@ export type VerificationResult =
       session: ChallengeSessionState;
     }
   | { kind: "failed"; failure: ChallengeFailure; state?: ChallengeState };
+
+export type SwapResult =
+  | { kind: "swapped"; state: ChallengeState; sessionId?: string }
+  | { kind: "failed"; failure: ChallengeFailure };
 
 function sixDigitCode(): string {
   return randomInt(0, 1_000_000).toString().padStart(6, "0");
@@ -165,24 +203,39 @@ function chooseTypes(
   return result;
 }
 
-function createAudioSequence(): AudioSequenceState {
+function createAudioSequence(preview = false): AudioSequenceState {
+  const available = preview ? AUDIO_ANIMALS.slice(0, 3) : AUDIO_ANIMALS;
   const animals: AnimalSound[] = [];
   while (animals.length < 4) {
-    animals.push(AUDIO_ANIMALS[randomInt(0, AUDIO_ANIMALS.length)]?.key ?? "bird");
+    animals.push(available[randomInt(0, available.length)]?.key ?? "bird");
   }
   const catIndex = randomInt(0, 3);
-  const answerKey: "dog" | "bird" = randomInt(0, 2) === 0 ? "dog" : "bird";
+  const answerPool = available.filter((animal) => animal.key !== "cat");
+  const answerKey =
+    answerPool[randomInt(0, answerPool.length)]?.key ?? "dog";
   animals[catIndex] = "cat";
   animals[catIndex + 1] = answerKey;
+  const optionKeys = new Set<AnimalSound>(["cat", answerKey]);
+  for (const animal of shuffle([...available])) {
+    if (optionKeys.size >= Math.min(4, available.length)) {
+      break;
+    }
+    optionKeys.add(animal.key);
+  }
 
   return {
     animals,
     answerKey,
-    options: shuffle([...AUDIO_ANIMALS]),
+    options: shuffle(
+      available.filter((animal) => optionKeys.has(animal.key)),
+    ),
   };
 }
 
-function createCalculation() {
+function createCalculation(preview = false) {
+  if (preview) {
+    return { expression: "128 × 37 + 46 × 23", answer: String(128 * 37 + 46 * 23) };
+  }
   const first = randomInt(120, 990);
   const second = randomInt(17, 89);
   const third = randomInt(23, 99);
@@ -211,17 +264,25 @@ export class ChallengeStore {
     risk: RiskLevel = "low",
     requestedSteps?: number,
     testMode = false,
+    deviceClass: DeviceClass = "desktop",
+    preview = false,
   ): ChallengeState {
     this.cleanup();
 
-    const totalSteps = accessible || requestedType ? 1 : (requestedSteps ?? RISK_STEPS[risk]);
+    const totalSteps = preview || accessible || requestedType
+      ? 1
+      : (requestedSteps ?? RISK_STEPS[risk]);
     const sessionId = randomBytes(18).toString("base64url");
     const now = Date.now();
     const expiresAt = now + this.config.challengeTtlSeconds * 1000;
+    const explicitType =
+      deviceClass === "mobile" && requestedType === "key_pointer"
+        ? undefined
+        : requestedType;
     const types = chooseTypes(
       totalSteps,
-      this.availableTypes(),
-      accessible ? "inverse_occlusion" : requestedType,
+      this.availableTypes(deviceClass),
+      accessible ? "inverse_occlusion" : explicitType,
     );
     const session: ChallengeSessionState = {
       id: sessionId,
@@ -237,6 +298,8 @@ export class ChallengeStore {
       expiresAt,
       completed: false,
       testMode,
+      deviceClass,
+      swapsRemaining: deviceClass === "desktop" ? 1 : 0,
     };
 
     types.forEach((type, stepIndex) => {
@@ -252,12 +315,128 @@ export class ChallengeStore {
         totalSteps,
         createdAt: now,
         expiresAt,
+        deviceClass,
+        preview,
       });
       this.challenges.set(state.id, state);
       session.challengeIds.push(state.id);
     });
     this.sessions.set(session.id, session);
     return this.currentState(session.id) as ChallengeState;
+  }
+
+  createPreview(
+    siteKey: string,
+    action: string,
+    parentOrigin: string | null,
+    deviceClass: DeviceClass,
+    accessible = false,
+  ): ChallengeState {
+    this.cleanup();
+    const type =
+      accessible
+        ? "inverse_occlusion"
+        : chooseTypes(1, this.availableTypes(deviceClass))[0] ??
+          "inverse_occlusion";
+    const now = Date.now();
+    const state = this.createState({
+      siteKey,
+      action,
+      parentOrigin,
+      accessible,
+      type,
+      risk: "low",
+      stepIndex: 0,
+      totalSteps: 1,
+      createdAt: now,
+      expiresAt: now + this.config.challengeTtlSeconds * 1000,
+      deviceClass,
+      preview: true,
+    });
+    this.challenges.set(state.id, state);
+    return state;
+  }
+
+  swap(id: string, accessible = false): SwapResult {
+    const state = this.challenges.get(id);
+    if (!state || state.used || state.expiresAt <= Date.now()) {
+      return {
+        kind: "failed",
+        failure: { verified: false, code: "CHALLENGE_NOT_FOUND" },
+      };
+    }
+    if (
+      (!state.preview && !state.swapAllowed && !accessible) ||
+      (state.deviceClass ?? "desktop") === "mobile"
+    ) {
+      return {
+        kind: "failed",
+        failure: { verified: false, code: "SWAP_NOT_ALLOWED" },
+      };
+    }
+
+    if (state.preview) {
+      this.challenges.delete(id);
+      let replacement = this.createPreview(
+        state.siteKey,
+        state.action,
+        state.parentOrigin,
+        state.deviceClass ?? "desktop",
+        accessible,
+      );
+      for (
+        let attempt = 0;
+        !accessible && attempt < 4 && replacement.type === state.type;
+        attempt += 1
+      ) {
+        this.challenges.delete(replacement.id);
+        replacement = this.createPreview(
+          state.siteKey,
+          state.action,
+          state.parentOrigin,
+          state.deviceClass ?? "desktop",
+          accessible,
+        );
+      }
+      return { kind: "swapped", state: replacement };
+    }
+
+    const session = state.sessionId ? this.getSession(state.sessionId) : undefined;
+    if (!session || session.swapsRemaining <= 0) {
+      return {
+        kind: "failed",
+        failure: { verified: false, code: "SWAP_NOT_ALLOWED" },
+      };
+    }
+    const deviceClass = state.deviceClass ?? "desktop";
+    const available = this.availableTypes(deviceClass).filter(
+      (type) => type !== state.type,
+    );
+    const nextType = accessible
+      ? "inverse_occlusion"
+      : chooseTypes(1, available)[0] ?? state.type;
+    const replacement = this.createState({
+      siteKey: state.siteKey,
+      action: state.action,
+      parentOrigin: state.parentOrigin,
+      accessible: accessible || state.accessible,
+      type: nextType,
+      risk: session.risk,
+      sessionId: session.id,
+      stepIndex: session.currentStep,
+      totalSteps: session.totalSteps,
+      createdAt: state.createdAt,
+      expiresAt: state.expiresAt,
+      deviceClass,
+      preview: false,
+    });
+    this.challenges.delete(id);
+    this.challenges.set(replacement.id, replacement);
+    session.challengeIds[session.currentStep] = replacement.id;
+    if (!accessible) {
+      session.swapsRemaining -= 1;
+    }
+    return { kind: "swapped", state: replacement, sessionId: session.id };
   }
 
   getSession(id: string): ChallengeSessionState | undefined {
@@ -353,16 +532,22 @@ export class ChallengeStore {
         failure = { verified: false, code: "INVALID_SELECTION" };
       }
     } else if (state.type === "motion_drag") {
-      passed = Boolean(state.motion && evidence.point && validMotionPoint(state.motion, evidence.point));
+      passed = Boolean(
+        state.motion &&
+          evidence.point &&
+          validMotionPoint(
+            state.motion,
+            evidence.point,
+            evidence.coverageMs ?? 0,
+          ),
+      );
       if (!passed) {
         failure = { verified: false, code: "INVALID_POINT" };
       }
     } else if (state.type === "audio_sequence") {
       passed = Boolean(
         state.audioSequence &&
-          (evidence.answer === "cat" ||
-            evidence.answer === "dog" ||
-            evidence.answer === "bird") &&
+          AUDIO_ANIMALS.some((animal) => animal.key === evidence.answer) &&
           evidence.answer === state.audioSequence.answerKey,
       );
     } else if (state.type === "calculation") {
@@ -389,12 +574,7 @@ export class ChallengeStore {
     } else if (state.type === "market_trade") {
       passed = Boolean(
         state.marketTrade &&
-          evidence.market &&
-          validMarketChoice(
-            state.marketTrade,
-            evidence.market.buyIndex,
-            evidence.market.sellIndex,
-          ),
+          validMarketChoice(state.marketTrade, evidence.marketTrades),
       );
       if (!passed) {
         failure = { verified: false, code: "INVALID_POINT" };
@@ -436,6 +616,7 @@ export class ChallengeStore {
         state.keyPointer &&
           typeof evidence.holdMs === "number" &&
           typeof evidence.distance === "number" &&
+          evidence.keyCode === state.keyPointer.requiredKey &&
           evidence.holdMs >= state.keyPointer.requiredHoldMs &&
           evidence.distance >= state.keyPointer.requiredDistance,
       );
@@ -444,6 +625,9 @@ export class ChallengeStore {
       }
     }
 
+    if (passed && state.preview) {
+      return this.completePreview(state);
+    }
     if (passed) {
       return this.completeStep(state);
     }
@@ -469,11 +653,12 @@ export class ChallengeStore {
     return this.challenges.size;
   }
 
-  private availableTypes(): ChallengeType[] {
+  private availableTypes(deviceClass: DeviceClass): ChallengeType[] {
     return CHALLENGE_TYPES.filter(
       (type) =>
-        type !== "turnstile" ||
-        Boolean(this.config.turnstileSiteKey && this.config.turnstileSecretKey),
+        (type !== "turnstile" ||
+          Boolean(this.config.turnstileSiteKey && this.config.turnstileSecretKey)) &&
+        (deviceClass !== "mobile" || type !== "key_pointer"),
     );
   }
 
@@ -484,11 +669,13 @@ export class ChallengeStore {
     accessible: boolean;
     type: ChallengeType;
     risk: RiskLevel;
-    sessionId: string;
+    sessionId?: string;
     stepIndex: number;
     totalSteps: number;
     createdAt: number;
     expiresAt: number;
+    deviceClass: DeviceClass;
+    preview: boolean;
   }): ChallengeState {
     const common = {
       id: randomBytes(18).toString("base64url"),
@@ -502,10 +689,18 @@ export class ChallengeStore {
       maxAttempts: this.config.maxAttempts,
       used: false,
       accessible: input.accessible,
-      sessionId: input.sessionId,
       stepIndex: input.stepIndex,
       totalSteps: input.totalSteps,
       risk: input.risk,
+      deviceClass: input.deviceClass,
+      preview: input.preview,
+      swapAllowed:
+        input.preview ||
+        (input.deviceClass === "desktop" &&
+          (input.type === "hand_motion" ||
+            input.type === "speech_wave" ||
+            input.type === "turnstile")),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     } as const;
 
     if (input.type === "inverse_occlusion") {
@@ -514,7 +709,9 @@ export class ChallengeStore {
       while (decoyCode === visibleCode) {
         decoyCode = sixDigitCode();
       }
-      const palette = PALETTE[randomInt(0, PALETTE.length)] ?? PALETTE[0];
+      const palette = input.preview
+        ? PALETTE[0]
+        : PALETTE[randomInt(0, PALETTE.length)] ?? PALETTE[0];
       return {
         ...common,
         visibleCode,
@@ -524,46 +721,62 @@ export class ChallengeStore {
       };
     }
     if (input.type === "grid_select") {
-      return { ...common, grid: createGrid() };
+      return { ...common, grid: createGrid(input.preview) };
     }
     if (input.type === "motion_drag") {
-      return { ...common, motion: createMotion() };
+      return {
+        ...common,
+        motion: createMotion(input.preview ? 2_026_110 : undefined),
+      };
     }
     if (input.type === "audio_sequence") {
-      return { ...common, audioSequence: createAudioSequence() };
+      return { ...common, audioSequence: createAudioSequence(input.preview) };
     }
     if (input.type === "calculation") {
-      return { ...common, calculation: createCalculation() };
+      return { ...common, calculation: createCalculation(input.preview) };
     }
     if (input.type === "pattern_memory") {
       return {
         ...common,
         patternMemory: createPatternMemory(
-          randomInt(3, 6),
-          randomInt(1, 2_147_483_647),
+          input.preview ? 3 : randomInt(3, 6),
+          input.preview ? 202_611 : randomInt(1, 2_147_483_647),
         ),
       };
     }
     if (input.type === "count_flash") {
       return {
         ...common,
-        countFlash: createCountFlash(randomInt(1, 2_147_483_647)),
+        countFlash: createCountFlash(
+          input.preview ? 11 : randomInt(1, 2_147_483_647),
+        ),
       };
     }
     if (input.type === "market_trade") {
+      const mode =
+        input.preview || input.risk === "low"
+          ? "single"
+          : randomInt(0, 2) === 0
+            ? "single"
+            : "target";
       return {
         ...common,
-        marketTrade: createMarketTrade(randomInt(1, 2_147_483_647)),
+        marketTrade: createMarketTrade(
+          input.preview ? 20_261_107 : randomInt(1, 2_147_483_647),
+          mode,
+        ),
       };
     }
     if (input.type === "human_check") {
       return {
         ...common,
-        humanCheck: { minDwellMs: randomInt(650, 1_200) },
+        humanCheck: {
+          minDwellMs: input.preview ? 800 : randomInt(650, 1_200),
+        },
       };
     }
     if (input.type === "rotate_align") {
-      let initialAngle = randomInt(-160, 161);
+      let initialAngle = input.preview ? -75 : randomInt(-160, 161);
       if (Math.abs(initialAngle) < 25) {
         initialAngle += initialAngle < 0 ? -40 : 40;
       }
@@ -577,7 +790,9 @@ export class ChallengeStore {
     }
     if (input.type === "semantic_pick") {
       const semantic =
-        SEMANTIC_QUESTIONS[randomInt(0, SEMANTIC_QUESTIONS.length)] ??
+        SEMANTIC_QUESTIONS[
+          input.preview ? 0 : randomInt(0, SEMANTIC_QUESTIONS.length)
+        ] ??
         SEMANTIC_QUESTIONS[0];
       return {
         ...common,
@@ -597,8 +812,9 @@ export class ChallengeStore {
       };
     }
     if (input.type === "hand_motion") {
-      const sequenceLength = randomInt(2, 4);
-      const sequence = shuffle([...HAND_ACTIONS]).slice(0, sequenceLength);
+      const sequence = input.preview
+        ? (["open", "peace"] as HandMotionAction[])
+        : shuffle([...HAND_ACTIONS]).slice(0, randomInt(2, 4));
       return {
         ...common,
         handMotion: {
@@ -609,7 +825,11 @@ export class ChallengeStore {
     }
     if (input.type === "speech_wave") {
       const template =
-        SPEECH_TEMPLATES[randomInt(0, SPEECH_TEMPLATES.length)] ??
+        SPEECH_TEMPLATES[
+          input.preview
+            ? randomInt(0, Math.max(1, Math.ceil(SPEECH_TEMPLATES.length * PUBLIC_PREVIEW_RATIO)))
+            : randomInt(0, SPEECH_TEMPLATES.length)
+        ] ??
         SPEECH_TEMPLATES[0];
       return {
         ...common,
@@ -619,8 +839,18 @@ export class ChallengeStore {
     return {
       ...common,
       keyPointer: {
-        requiredDistance: randomInt(150, 221),
-        requiredHoldMs: randomInt(650, 951),
+        requiredDistance: input.preview ? 180 : randomInt(150, 221),
+        requiredHoldMs: input.preview ? 800 : randomInt(650, 951),
+        ...(input.preview
+          ? { requiredKey: "Space", requiredKeyLabel: "空格" }
+          : (() => {
+              const key =
+                KEY_OPTIONS[randomInt(0, KEY_OPTIONS.length)] ?? {
+                  code: "Space",
+                  label: "空格",
+                };
+              return { requiredKey: key.code, requiredKeyLabel: key.label };
+            })()),
       },
     };
   }
@@ -671,6 +901,22 @@ export class ChallengeStore {
         risk: session.risk,
         stepsCompleted: session.totalSteps,
         expiresAt: new Date(Date.now() + this.config.tokenTtlSeconds * 1000).toISOString(),
+      },
+    };
+  }
+
+  private completePreview(state: ChallengeState): VerificationResult {
+    state.used = true;
+    this.challenges.delete(state.id);
+    return {
+      kind: "preview",
+      state,
+      receipt: {
+        verified: true,
+        preview: true,
+        action: state.action,
+        siteKey: state.siteKey,
+        type: state.type,
       },
     };
   }

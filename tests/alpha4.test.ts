@@ -117,10 +117,10 @@ function evidenceFor(state: ChallengeState): ChallengeEvidence {
   if (state.type === "speech_wave") {
     return { audioTakes: syntheticTakes() };
   }
-  throw new Error(`no alpha.4 evidence helper for ${state.type}`);
+  throw new Error(`no alpha.5 evidence helper for ${state.type}`);
 }
 
-describe("alpha.4 challenge verification", () => {
+describe("alpha.5 challenge verification", () => {
   it("verifies the three basic interaction challenges", async () => {
     const built = await buildApp({
       config: makeConfig(),
@@ -251,7 +251,7 @@ describe("alpha.4 challenge verification", () => {
   });
 });
 
-describe("alpha.4 risk helpers", () => {
+describe("alpha.5 risk helpers", () => {
   it("prefers Cloudflare client IP and only upgrades requested risk", () => {
     expect(
       clientIp({
@@ -313,7 +313,7 @@ describe("alpha.4 risk helpers", () => {
   });
 });
 
-describe("alpha.4 Turnstile and platform persistence", () => {
+describe("alpha.5 Turnstile and platform persistence", () => {
   it("advertises API version 1 and rejects incompatible callers", async () => {
     const built = await buildApp({
       config: makeConfig(),
@@ -324,7 +324,7 @@ describe("alpha.4 Turnstile and platform persistence", () => {
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.4" });
+      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.5" });
 
       const mismatch = await built.app.inject({
         method: "POST",

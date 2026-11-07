@@ -35,15 +35,27 @@ import {
   PATTERN_ICON_KEYS,
   patternSequence,
 } from "../microgames.js";
+import {
+  initMarketChallenge,
+  type MarketController,
+} from "./market.js";
+import type { HandMotionAction } from "../types.js";
 
 type MotionData = {
   width: number;
   height: number;
   seed: number;
   duration: number;
+  requiredCoverage: number;
+  targetRadius: number;
 };
 
-type MotionPoint = { x: number; y: number; elapsedMs: number };
+type MotionPoint = {
+  x: number;
+  y: number;
+  elapsedMs: number;
+  coverageMs?: number;
+};
 
 type TurnstileApi = {
   render(
@@ -64,7 +76,7 @@ declare global {
     turnstile?: TurnstileApi;
     __oxygenHandTest?: (
       observations: Array<{
-        action: "open" | "fist" | "peace";
+        action: HandMotionAction;
         durationMs: number;
       }>,
     ) => void;
@@ -114,6 +126,11 @@ const gestureWrap = document.querySelector<HTMLElement>(".oc-gesture-wrap");
 const motionWrap = document.querySelector<HTMLElement>(".oc-motion-wrap");
 const motionCanvas = document.querySelector<HTMLCanvasElement>("#oc-motion-canvas");
 const motionHelp = document.querySelector<HTMLElement>("#oc-motion-help");
+const entryCheck = document.querySelector<HTMLButtonElement>("#oc-entry-check");
+const entryLabel = document.querySelector<HTMLElement>("#oc-entry-label");
+const entryAccessibility = document.querySelector<HTMLButtonElement>(
+  "#oc-entry-accessibility",
+);
 const type = body.dataset.challengeType ?? "inverse_occlusion";
 const testMode = body.dataset.testMode === "1";
 const pageStartedAt = performance.now();
@@ -121,21 +138,46 @@ const selected = new Set<number>();
 let audioChoice: string | null = null;
 let semanticChoice: string | null = null;
 let turnstileToken: string | null = null;
-let handEvidence: Array<{ action: "open" | "fist" | "peace"; durationMs: number }> =
-  [];
+let handEvidence: Array<{ action: HandMotionAction; durationMs: number }> = [];
 let audioTakes: number[][][] = [];
 let rotateAngle = Number.parseFloat(rotateSlider?.value ?? "0");
 let patternSelection: number[] = [];
 let marketBuyIndex: number | null = null;
 let marketSellIndex: number | null = null;
 let marketMode: "buy" | "sell" = "buy";
-let keyPointerEvidence: { holdMs: number; distance: number } | null = null;
+let marketTrades: Array<{ buyIndex: number; sellIndex: number }> = [];
+let marketCapitalValue = 0;
+let marketController: MarketController | null = null;
+let keyPointerEvidence: { holdMs: number; distance: number; keyCode: string } | null =
+  null;
 let keyPointerReady = false;
 let verified = false;
 let motionPoint: MotionPoint | null = null;
 let motionReady = false;
 let lastReportedHeight = 0;
 let transitioning = false;
+let launching = false;
+
+const HAND_ACTION_LABELS: Record<HandMotionAction, string> = {
+  open: "张开手掌",
+  fist: "握拳",
+  peace: "剪刀手",
+  thumb_up: "竖起拇指",
+  thumb_down: "拇指向下",
+  point_up: "食指向上",
+  ok: "OK 手势",
+  call_me: "六字手势",
+  l_sign: "L 形手势",
+  pinky: "小指向上",
+};
+
+function handActionLabel(action: HandMotionAction): string {
+  return HAND_ACTION_LABELS[action];
+}
+
+function isHandAction(value: string): value is HandMotionAction {
+  return value in HAND_ACTION_LABELS;
+}
 
 function play(effect: "success" | "error" | "click"): void {
   try {
@@ -195,6 +237,68 @@ function post(messageType: string, detail: Record<string, unknown>): void {
   );
 }
 
+function showSuccessState(): void {
+  body.classList.add("oc-entry-page");
+  body.dataset.entry = "1";
+  body.dataset.entryState = "success";
+  body.dataset.challengeType = "entry";
+  if (!shell) {
+    return;
+  }
+  shell.className = "oc-shell oc-entry-shell";
+  shell.innerHTML = `
+    <section class="oc-entry" aria-label="OxygenChallenge">
+      <div class="oc-entry-bar">
+        <span class="oc-entry-check" aria-hidden="true">
+          <span class="oc-entry-check-box"></span>
+        </span>
+        <span class="oc-entry-label">验证通过</span>
+        <img class="oc-entry-mark" src="/oxygenmark.png" alt="Oxygen">
+      </div>
+      <div class="oc-entry-brand">
+        <span>Oxygen Challenge</span>
+        <a class="oc-entry-accessibility" href="/privacy-policy" target="_blank" rel="noopener noreferrer">隐私与条款</a>
+      </div>
+    </section>`;
+  lastReportedHeight = 96;
+  post("resize", { height: 96, compact: true });
+}
+
+function launchChallenge(accessible = false): void {
+  if (launching) {
+    return;
+  }
+  launching = true;
+  body.dataset.entryState = "loading";
+  if (entryLabel) {
+    entryLabel.textContent = "正在验证…";
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.set("launch", "1");
+  if (accessible) {
+    url.searchParams.set("accessible", "1");
+  }
+  if (!url.searchParams.has("session") && shell?.dataset.sessionId) {
+    url.searchParams.set("session", shell.dataset.sessionId);
+  }
+  if (!url.searchParams.has("sitekey") && shell?.dataset.siteKey) {
+    url.searchParams.set("sitekey", shell.dataset.siteKey);
+    url.searchParams.set("action", shell.dataset.action ?? "submit");
+    if (shell.dataset.parentOrigin) {
+      url.searchParams.set("parentOrigin", shell.dataset.parentOrigin);
+    }
+  }
+  window.setTimeout(() => window.location.assign(url), 160);
+}
+
+function initEntry(): void {
+  if (body.dataset.entry !== "1" || !entryCheck) {
+    return;
+  }
+  entryCheck.addEventListener("click", () => launchChallenge(false));
+  entryAccessibility?.addEventListener("click", () => launchChallenge(true));
+}
+
 function setStatus(message: string, tone: "neutral" | "error" | "success" = "neutral"): void {
   if (!status) {
     return;
@@ -208,6 +312,11 @@ function wait(milliseconds: number): Promise<void> {
 }
 
 function reportHeight(): void {
+  if (body.dataset.entryState === "success") {
+    lastReportedHeight = 96;
+    post("resize", { height: 96, compact: true });
+    return;
+  }
   const height = Math.ceil(document.documentElement.scrollHeight);
   if (height === lastReportedHeight) {
     return;
@@ -495,10 +604,7 @@ function initHandMotion(): void {
   }
   const sequence = (actionSequence.dataset.sequence ?? "")
     .split(",")
-    .filter(
-      (action): action is "open" | "fist" | "peace" =>
-        action === "open" || action === "fist" || action === "peace",
-    );
+    .filter(isHandAction);
   const holdMs = Number.parseInt(actionSequence.dataset.hold ?? "450", 10);
   let stream: MediaStream | null = null;
   let landmarker: HandLandmarker | null = null;
@@ -506,10 +612,7 @@ function initHandMotion(): void {
   let currentIndex = 0;
   let holdStartedAt = 0;
   let lastVideoTime = -1;
-  const observations: Array<{
-    action: "open" | "fist" | "peace";
-    durationMs: number;
-  }> = [];
+  const observations: Array<{ action: HandMotionAction; durationMs: number }> = [];
 
   appendIcon(handStart, Camera);
   const setCurrentAction = () => {
@@ -546,13 +649,17 @@ function initHandMotion(): void {
         drawHandSkeleton(handOverlay, hands);
         const action = classifyHand(hands[0] ?? []);
         const expected = sequence[currentIndex];
+        if (!expected) {
+          requestAnimationFrame(detect);
+          return;
+        }
         if (action !== "unknown" && action === expected) {
           if (holdStartedAt === 0) {
             holdStartedAt = performance.now();
           }
           const held = Math.round(performance.now() - holdStartedAt);
           if (handHelp) {
-            handHelp.textContent = `保持${action === "open" ? "张开手掌" : action === "fist" ? "握拳" : "剪刀手"} ${Math.min(100, Math.round((held / holdMs) * 100))}%`;
+            handHelp.textContent = `保持${handActionLabel(action)} ${Math.min(100, Math.round((held / holdMs) * 100))}%`;
           }
           if (held >= holdMs) {
             observations.push({ action, durationMs: held });
@@ -575,7 +682,7 @@ function initHandMotion(): void {
         } else {
           holdStartedAt = 0;
           if (handHelp) {
-            handHelp.textContent = `请完成：${expected === "open" ? "张开手掌" : expected === "fist" ? "握拳" : "剪刀手"}`;
+            handHelp.textContent = `请完成：${handActionLabel(expected)}`;
           }
         }
       } catch {
@@ -856,7 +963,8 @@ function initPatternMemory(): void {
 
   buttons.forEach((button, index) => {
     const icon = icons[PATTERN_ICON_KEYS[index] ?? "star"];
-    button.append(
+    const iconSlot = button.querySelector(".oc-pattern-icon");
+    iconSlot?.append(
       createElement(icon, {
         width: 30,
         height: 30,
@@ -1002,6 +1110,9 @@ function initCountFlash(): void {
 }
 
 function initMarketTrade(): void {
+  if (marketCanvas?.dataset.version === "2") {
+    return;
+  }
   if (!marketCanvas || !submit) {
     return;
   }
@@ -1161,8 +1272,10 @@ function initKeyPointer(): void {
 
   const requiredDistance = Number.parseInt(gestureWrap.dataset.requiredDistance ?? "160", 10);
   const requiredHold = Number.parseInt(gestureWrap.dataset.requiredHold ?? "700", 10);
+  const requiredKey = gestureWrap.dataset.requiredKey ?? "Space";
+  const requiredKeyLabel = gestureWrap.dataset.requiredKeyLabel ?? "空格";
   let pointerDown = false;
-  let spaceDown = false;
+  let requiredKeyDown = false;
   let distance = 0;
   let holdStartedAt = 0;
 
@@ -1193,7 +1306,7 @@ function initKeyPointer(): void {
       return;
     }
     const currentDistance = paint();
-    if (spaceDown && pointerDown && currentDistance >= requiredDistance) {
+    if (requiredKeyDown && pointerDown && currentDistance >= requiredDistance) {
       if (holdStartedAt === 0) {
         holdStartedAt = now;
         setStatus("正在确认双输入持续时间…");
@@ -1201,7 +1314,11 @@ function initKeyPointer(): void {
       const heldFor = Math.round(now - holdStartedAt);
       if (heldFor >= requiredHold) {
         keyPointerReady = true;
-        keyPointerEvidence = { holdMs: heldFor, distance: Math.round(currentDistance) };
+        keyPointerEvidence = {
+          holdMs: heldFor,
+          distance: Math.round(currentDistance),
+          keyCode: requiredKey,
+        };
         submit.disabled = false;
         if (help) {
           help.textContent = "双输入已确认，点击验证。";
@@ -1217,26 +1334,26 @@ function initKeyPointer(): void {
 
   window.addEventListener("keydown", (event) => {
     if (
-      event.code !== "Space" ||
+      event.code !== requiredKey ||
       event.repeat ||
       (event.target instanceof Element && event.target.closest("input, textarea, button"))
     ) {
       return;
     }
     event.preventDefault();
-    spaceDown = true;
-    setHelper("已按下空格键，继续拖动滑块。");
+    requiredKeyDown = true;
+    setHelper(`已按下 ${requiredKeyLabel} 键，继续拖动滑块。`);
     requestAnimationFrame(tick);
   });
 
   window.addEventListener("keyup", (event) => {
-    if (event.code !== "Space") {
+    if (event.code !== requiredKey) {
       return;
     }
-    spaceDown = false;
+    requiredKeyDown = false;
     if (!keyPointerReady) {
       holdStartedAt = 0;
-      setHelper("空格键已松开，需要同时按住键盘与拖动滑块。", "error");
+      setHelper(`${requiredKeyLabel} 键已松开，需要保持组合操作。`, "error");
     }
   });
 
@@ -1259,7 +1376,7 @@ function initKeyPointer(): void {
     pointerDown = false;
     if (!keyPointerReady) {
       holdStartedAt = 0;
-      setHelper("继续按住空格键，并将滑块拖到右侧。", "error");
+      setHelper(`继续按住 ${requiredKeyLabel} 键，并将滑块拖到右侧。`, "error");
     }
   };
   track.addEventListener("pointerup", releasePointer);
@@ -1280,7 +1397,15 @@ function initMotion(): void {
     width: Number.parseInt(motionWrap.dataset.width ?? "360", 10),
     height: Number.parseInt(motionWrap.dataset.height ?? "150", 10),
     seed: Number.parseInt(motionWrap.dataset.seed ?? "1", 10),
-    duration: Number.parseInt(motionWrap.dataset.duration ?? "9000", 10),
+    duration: Number.parseInt(motionWrap.dataset.duration ?? "20000", 10),
+    requiredCoverage: Number.parseInt(
+      motionWrap.dataset.requiredCoverage ?? "1800",
+      10,
+    ),
+    targetRadius: Number.parseInt(
+      motionWrap.dataset.targetRadius ?? "32",
+      10,
+    ),
   };
   const start = performance.now();
   const cover = { x: data.width / 2, y: data.height / 2, visible: false };
@@ -1349,7 +1474,7 @@ function initMotion(): void {
     context.strokeStyle = "rgba(47, 111, 237, 0.28)";
     context.lineWidth = 8;
     context.beginPath();
-    context.arc(target.x, target.y, 18, 0, Math.PI * 2);
+    context.arc(target.x, target.y, data.targetRadius + 6, 0, Math.PI * 2);
     context.stroke();
 
     if (cover.visible) {
@@ -1362,15 +1487,26 @@ function initMotion(): void {
       context.stroke();
     }
 
-    const overTarget = Math.hypot(cover.x - target.x, cover.y - target.y) <= 38;
+    const overTarget =
+      Math.hypot(cover.x - target.x, cover.y - target.y) <=
+      data.targetRadius + 6;
     if (cover.visible && overTarget) {
       if (holdStart === 0) {
         holdStart = now;
       }
       const held = now - holdStart;
-      if (held >= 450 && !canSubmit) {
+      if (
+        elapsed >= 4_000 &&
+        held >= data.requiredCoverage &&
+        !canSubmit &&
+        lastPoint
+      ) {
         canSubmit = true;
         motionReady = true;
+        motionPoint = {
+          ...lastPoint,
+          coverageMs: Math.round(held),
+        };
         submit.disabled = false;
         setStatus("覆盖成功，可以验证。", "success");
         if (motionHelp) {
@@ -1394,7 +1530,14 @@ function initMotion(): void {
     cover.y = point.y;
     cover.visible = true;
     lastPoint = { ...point, elapsedMs: Math.round(performance.now() - start) };
-    motionPoint = lastPoint;
+    if (!canSubmit) {
+      motionPoint = lastPoint;
+    } else if (motionPoint) {
+      motionPoint = {
+        ...lastPoint,
+        coverageMs: motionPoint.coverageMs ?? 0,
+      };
+    }
   };
 
   motionCanvas.addEventListener("pointerdown", (event) => {
@@ -1442,6 +1585,7 @@ function initMotion(): void {
 appendIcon(refresh, RefreshCw);
 appendIcon(audioButton, Volume2);
 appendIcon(accessibleButton, Accessibility);
+initEntry();
 initGrid();
 initAudioSequence();
 initSemanticPick();
@@ -1452,7 +1596,20 @@ initHandMotion();
 initSpeechWave();
 initPatternMemory();
 initCountFlash();
-initMarketTrade();
+if (marketCanvas && submit && marketCanvas.dataset.version === "2") {
+  marketController = initMarketChallenge({
+    canvas: marketCanvas,
+    buyButton: marketBuyButton,
+    sellButton: marketSellButton,
+    help: marketHelp,
+    submit,
+    setStatus,
+    play,
+    testMode,
+  });
+} else {
+  initMarketTrade();
+}
 initKeyPointer();
 initMotion();
 reportHeight();
@@ -1466,9 +1623,45 @@ if (form) {
 }
 window.addEventListener("load", reportHeight);
 
-refresh?.addEventListener("click", () => {
+refresh?.addEventListener("click", async () => {
   play("click");
-  window.location.reload();
+  if (shell?.dataset.preview === "1" || shell?.dataset.swapAllowed !== "1") {
+    window.location.reload();
+    return;
+  }
+  if (!shell?.dataset.challengeId) {
+    return;
+  }
+  refresh.disabled = true;
+  setStatus("正在更换挑战…");
+  try {
+    const response = await fetch(
+      `/v1/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
+    const result = (await response.json()) as {
+      swapped?: boolean;
+      nextEmbedUrl?: string;
+      code?: string;
+    };
+    if (response.ok && result.swapped && result.nextEmbedUrl) {
+      window.location.assign(result.nextEmbedUrl);
+      return;
+    }
+    setStatus(
+      result.code === "SWAP_NOT_ALLOWED"
+        ? "当前挑战不能更换。"
+        : "更换挑战失败，请刷新重试。",
+      "error",
+    );
+  } catch {
+    setStatus("网络错误，更换挑战失败。", "error");
+  }
+  refresh.disabled = false;
 });
 
 audioButton?.addEventListener("click", () => {
@@ -1483,9 +1676,51 @@ audioButton?.addEventListener("click", () => {
   });
 });
 
-accessibleButton?.addEventListener("click", () => {
+accessibleButton?.addEventListener("click", async () => {
   play("click");
-  reloadWithAccessible();
+  if (!shell?.dataset.challengeId) {
+    return;
+  }
+  setStatus("正在切换到无障碍验证…");
+  accessibleButton.disabled = true;
+  try {
+    const response = await fetch(
+      `/v1/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessible: true }),
+      },
+    );
+    const result = (await response.json()) as {
+      swapped?: boolean;
+      preview?: boolean;
+      nextEmbedUrl?: string;
+      code?: string;
+    };
+    if (!response.ok || !result.swapped) {
+      setStatus(
+        result.code === "SWAP_NOT_ALLOWED"
+          ? "当前设备需要完成原验证。"
+          : "无法切换无障碍验证，请刷新后重试。",
+        "error",
+      );
+      accessibleButton.disabled = false;
+      return;
+    }
+    window.location.assign(
+      result.nextEmbedUrl ??
+        (() => {
+          const url = new URL("/captcha", window.location.origin);
+          url.searchParams.set("launch", "1");
+          url.searchParams.set("accessible", "1");
+          return url.toString();
+        })(),
+    );
+  } catch {
+    setStatus("网络错误，无法切换无障碍验证。", "error");
+    accessibleButton.disabled = false;
+  }
 });
 
 form?.addEventListener("submit", async (event) => {
@@ -1539,15 +1774,14 @@ form?.addEventListener("submit", async (event) => {
     }
     payload.holdMs = keyPointerEvidence.holdMs;
     payload.distance = keyPointerEvidence.distance;
+    payload.keyCode = keyPointerEvidence.keyCode;
   } else if (type === "market_trade") {
-    if (marketBuyIndex === null || marketSellIndex === null) {
-      setStatus("请先选择买入点和卖出点。", "error");
+    const trades = marketController?.trades() ?? marketTrades;
+    if (trades.length === 0) {
+      setStatus("请先完成一次买卖交易。", "error");
       return;
     }
-    payload.market = {
-      buyIndex: marketBuyIndex,
-      sellIndex: marketSellIndex,
-    };
+    payload.marketTrades = trades;
   } else if (type === "human_check") {
     if (!humanInput?.checked) {
       setStatus("请先勾选确认框。", "error");
@@ -1587,6 +1821,7 @@ form?.addEventListener("submit", async (event) => {
       return;
     }
     payload.point = motionPoint;
+    payload.coverageMs = motionPoint.coverageMs ?? 0;
   }
 
   submit.disabled = true;
@@ -1599,6 +1834,7 @@ form?.addEventListener("submit", async (event) => {
     });
     const result = (await response.json()) as {
       verified?: boolean;
+      preview?: boolean;
       token?: string;
       code?: string;
       remainingAttempts?: number;
@@ -1607,6 +1843,13 @@ form?.addEventListener("submit", async (event) => {
       totalSteps?: number;
       nextEmbedUrl?: string;
     };
+
+    if (result.verified && result.preview) {
+      verified = true;
+      play("success");
+      window.setTimeout(showSuccessState, 220);
+      return;
+    }
 
     if (result.verified && result.token) {
       verified = true;
@@ -1617,8 +1860,8 @@ form?.addEventListener("submit", async (event) => {
         siteKey: shell.dataset.siteKey,
         action: shell.dataset.action,
       });
-      submit.textContent = "已完成";
       submit.disabled = true;
+      window.setTimeout(showSuccessState, 220);
       return;
     }
 

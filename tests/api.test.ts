@@ -7,9 +7,13 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { RISK_STEPS } from "../src/challenge.js";
 import {
+  countFlashPoints,
   countFromSeed,
-  extremeIndices,
+  createMarketTrade,
+  marketCapital,
+  marketBand,
   patternSequence,
+  validMarketChoice,
 } from "../src/microgames.js";
 import { motionTarget } from "../src/motion.js";
 import type {
@@ -127,7 +131,10 @@ describe("OxygenChallenge API", () => {
       return { selectedIndices: state.grid.targetIndices };
     }
     if (state.type === "motion_drag" && state.motion) {
-      return { point: { ...motionTarget(state.motion, 1_200), elapsedMs: 1_200 } };
+      return {
+        point: { ...motionTarget(state.motion, 5_200), elapsedMs: 5_200 },
+        coverageMs: state.motion.requiredCoverageMs,
+      };
     }
     if (state.type === "audio_sequence") {
       if (!state.audioSequence) {
@@ -145,6 +152,7 @@ describe("OxygenChallenge API", () => {
       return {
         holdMs: state.keyPointer.requiredHoldMs,
         distance: state.keyPointer.requiredDistance,
+        keyCode: state.keyPointer.requiredKey,
       };
     }
     if (state.type === "pattern_memory" && state.patternMemory) {
@@ -159,13 +167,7 @@ describe("OxygenChallenge API", () => {
       return { answer: String(countFromSeed(state.countFlash.seed)) };
     }
     if (state.type === "market_trade" && state.marketTrade) {
-      const extremes = extremeIndices(state.marketTrade.prices);
-      return {
-        market: {
-          buyIndex: state.marketTrade.buyIndex ?? extremes.low,
-          sellIndex: state.marketTrade.sellIndex ?? extremes.high,
-        },
-      };
+      return { marketTrades: [bestMarketTrade(state.marketTrade.prices)] };
     }
     if (state.type === "human_check" && state.humanCheck) {
       return { answer: "human", dwellMs: state.humanCheck.minDwellMs };
@@ -202,6 +204,56 @@ describe("OxygenChallenge API", () => {
         }),
       );
     return [1, 2, 3].map((index) => take(index));
+  }
+
+  function bestMarketTrade(prices: number[]): {
+    buyIndex: number;
+    sellIndex: number;
+  } {
+    const band = marketBand(prices, 0.16);
+    let best: { buyIndex: number; sellIndex: number; gain: number } | undefined;
+    for (let buyIndex = 0; buyIndex < prices.length; buyIndex += 1) {
+      const buy = prices[buyIndex];
+      if (buy === undefined || buy > band.low) {
+        continue;
+      }
+      for (let sellIndex = buyIndex + 1; sellIndex < prices.length; sellIndex += 1) {
+        const sell = prices[sellIndex];
+        if (sell === undefined || sell < band.high) {
+          continue;
+        }
+        const gain = sell / buy;
+        if (!best || gain > best.gain) {
+          best = { buyIndex, sellIndex, gain };
+        }
+      }
+    }
+    if (!best) {
+      throw new Error("market seed has no valid trade");
+    }
+    return { buyIndex: best.buyIndex, sellIndex: best.sellIndex };
+  }
+
+  function targetMarketTrades(market: ReturnType<typeof createMarketTrade>) {
+    const buyBand = marketBand(market.prices, market.buyBandRatio);
+    const sellBand = marketBand(market.prices, market.sellBandRatio);
+    const trades: Array<{ buyIndex: number; sellIndex: number }> = [];
+    let previousSell = -1;
+    for (let buyIndex = 0; buyIndex < market.prices.length; buyIndex += 1) {
+      const buy = market.prices[buyIndex];
+      if (buyIndex <= previousSell || buy === undefined || buy > buyBand.low) {
+        continue;
+      }
+      for (let sellIndex = buyIndex + 1; sellIndex < market.prices.length; sellIndex += 1) {
+        const sell = market.prices[sellIndex];
+        if (sell !== undefined && sell >= sellBand.high) {
+          trades.push({ buyIndex, sellIndex });
+          previousSell = sellIndex;
+          break;
+        }
+      }
+    }
+    return trades;
   }
 
   it("creates an inverse-occlusion challenge with hidden decoy and path-only overlay", async () => {
@@ -267,9 +319,18 @@ describe("OxygenChallenge API", () => {
   });
 
   it("renders a server-side embed with the decoy in HTML and visible digits only in the image", async () => {
-    const response = await app.inject({
+    const entry = await app.inject({
       method: "GET",
       url: "/embed?sitekey=site_test&action=submit&parentOrigin=https%3A%2F%2Fapp.test&challengeType=inverse_occlusion",
+      headers: { referer: "https://app.test/form" },
+    });
+    expect(entry.statusCode).toBe(200);
+    expect(entry.body).toContain('id="oc-entry-check"');
+    expect(entry.body).not.toContain('class="oc-decoy"');
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/embed?sitekey=site_test&action=submit&parentOrigin=https%3A%2F%2Fapp.test&challengeType=inverse_occlusion&launch=1",
       headers: { referer: "https://app.test/form" },
     });
     expect(response.statusCode).toBe(200);
@@ -359,11 +420,11 @@ describe("OxygenChallenge API", () => {
       throw new Error("motion state missing");
     }
 
-    const point = { ...motionTarget(state.motion, 1_200), elapsedMs: 1_200 };
+    const point = { ...motionTarget(state.motion, 5_200), elapsedMs: 5_200 };
     const response = await app.inject({
       method: "POST",
       url: `/v1/challenges/${body.challengeId}/verify`,
-      payload: { point },
+      payload: { point, coverageMs: state.motion.requiredCoverageMs },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ verified: true, siteKey: "site_test" });
@@ -373,7 +434,7 @@ describe("OxygenChallenge API", () => {
     const body = await create("audio_sequence");
     const state = challenges.getForAsset(body.challengeId);
     expect(body.type).toBe("audio_sequence");
-    expect(body.options).toHaveLength(3);
+    expect(body.options).toHaveLength(4);
     expect(body.audioUrl).toContain("/sequence.wav");
     expect(body).not.toHaveProperty("answerKey");
     expect(state?.audioSequence?.animals).toContain("cat");
@@ -428,6 +489,7 @@ describe("OxygenChallenge API", () => {
       payload: {
         holdMs: state.keyPointer.requiredHoldMs - 1,
         distance: state.keyPointer.requiredDistance,
+        keyCode: state.keyPointer.requiredKey,
       },
     });
     expect(tooFast.statusCode).toBe(200);
@@ -439,6 +501,7 @@ describe("OxygenChallenge API", () => {
       payload: {
         holdMs: state.keyPointer.requiredHoldMs,
         distance: state.keyPointer.requiredDistance,
+        keyCode: state.keyPointer.requiredKey,
       },
     });
     expect(correct.statusCode).toBe(200);
@@ -485,6 +548,23 @@ describe("OxygenChallenge API", () => {
     expect(response.json()).toMatchObject({ verified: true, siteKey: "site_test" });
   });
 
+  it("keeps count-flash dots equal-sized and non-overlapping", () => {
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const count = countFromSeed(seed);
+      const points = countFlashPoints(seed, count);
+      expect(points).toHaveLength(count);
+      expect(new Set(points.map((point) => point.radius))).toEqual(new Set([11]));
+      for (let left = 0; left < points.length; left += 1) {
+        for (let right = left + 1; right < points.length; right += 1) {
+          const a = points[left];
+          const b = points[right];
+          expect(a && b ? Math.hypot((a.x - b.x) * 360, (a.y - b.y) * 170) : 0)
+            .toBeGreaterThan(36);
+        }
+      }
+    }
+  });
+
   it("validates a buy-low sell-high market interaction", async () => {
     const body = await create("market_trade");
     const state = challenges.getForAsset(body.challengeId);
@@ -494,18 +574,34 @@ describe("OxygenChallenge API", () => {
     if (!state?.marketTrade) {
       throw new Error("market state missing");
     }
+    const trade = bestMarketTrade(state.marketTrade.prices);
     const response = await app.inject({
       method: "POST",
       url: `/v1/challenges/${body.challengeId}/verify`,
       payload: {
-        market: {
-          buyIndex: state.marketTrade.buyIndex,
-          sellIndex: state.marketTrade.sellIndex,
-        },
+        marketTrades: [trade],
       },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ verified: true, siteKey: "site_test" });
+  });
+
+  it("supports the target-capital market variant with ordered trades", () => {
+    const market = createMarketTrade(20_261_107, "target");
+    const trades = targetMarketTrades(market);
+    expect(trades.length).toBeGreaterThanOrEqual(2);
+    expect(
+      marketCapital(market.prices, trades, market.initialCapital ?? 1_000),
+    ).toBeGreaterThanOrEqual(market.targetCapital ?? 0);
+    expect(validMarketChoice(market, trades)).toBe(true);
+    expect(
+      validMarketChoice(market, [
+        {
+          buyIndex: market.prices.indexOf(Math.max(...market.prices)),
+          sellIndex: market.prices.indexOf(Math.min(...market.prices)),
+        },
+      ]),
+    ).toBe(false);
   });
 
   it("issues a token only after all medium-risk session steps pass", async () => {
@@ -569,6 +665,59 @@ describe("OxygenChallenge API", () => {
     const critical = await createSession("critical");
     expect(high.totalSteps).toBe(RISK_STEPS.high);
     expect(critical.totalSteps).toBe(RISK_STEPS.critical);
+  });
+
+  it("serves /captcha as a sessionless preview after the entry gesture", async () => {
+    const entry = await app.inject({ method: "GET", url: "/captcha" });
+    expect(entry.statusCode).toBe(200);
+    expect(entry.body).toContain('id="oc-entry-check"');
+    expect(entry.body).not.toContain("data-challenge-id");
+
+    const launched = await app.inject({ method: "GET", url: "/captcha?launch=1" });
+    expect(launched.statusCode).toBe(200);
+    expect(launched.body).toContain('data-session-id=""');
+    const identifier = launched.body.match(/data-challenge-id="([^"]+)"/)?.[1];
+    expect(identifier).toBeTruthy();
+    const state = identifier ? challenges.getForAsset(identifier) : undefined;
+    expect(state?.preview).toBe(true);
+    expect(state?.sessionId).toBeUndefined();
+  });
+
+  it("filters pointer-combination challenges for mobile and allows an accessible replacement", async () => {
+    const mobile = await app.inject({
+      method: "POST",
+      url: "/v1/challenges",
+      headers: {
+        origin: "https://app.test",
+        "user-agent":
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+        "sec-ch-ua-mobile": "?1",
+      },
+      payload: {
+        siteKey: "site_test",
+        action: "submit",
+        challengeType: "key_pointer",
+      },
+    });
+    expect(mobile.statusCode).toBe(200);
+    expect(mobile.json()).toMatchObject({ deviceClass: "mobile" });
+    expect(mobile.json<{ type: ChallengeType }>().type).not.toBe("key_pointer");
+
+    const body = await create("grid_select");
+    const swapped = await app.inject({
+      method: "POST",
+      url: `/v1/challenges/${body.challengeId}/swap`,
+      payload: { accessible: true },
+    });
+    expect(swapped.statusCode).toBe(200);
+    expect(swapped.json()).toMatchObject({
+      swapped: true,
+      type: "inverse_occlusion",
+    });
+    const replacement = swapped.json<{ challengeId: string }>().challengeId;
+    const replacementState = challenges.getForAsset(replacement);
+    expect(replacementState?.accessible).toBe(true);
+    expect(replacementState?.type).toBe("inverse_occlusion");
   });
 
   it("rejects missing and disallowed origins", async () => {

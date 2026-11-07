@@ -1,18 +1,18 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.4` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.5` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
 一次性验证令牌、风险会话和十五类交互挑战：
 
 - `inverse_occlusion`：同色 DOM 诱饵 + 反色透明数字图。
 - `grid_select`：3×3 Lucide 图标多选。
-- `motion_drag`：拖动遮罩持续覆盖 Canvas 中的移动目标。
+- `motion_drag`：拖动遮罩持续覆盖 Canvas 中的移动目标，要求后段持续命中。
 - `audio_sequence`：程序合成动物声音序列，选择猫叫之后的动物。
 - `calculation`：需要计算器的大数四则运算。
-- `key_pointer`：同时按住空格键并拖动滑块的组合输入。
+- `key_pointer`：同时按住随机指定按键并拖动滑块的组合输入；移动端自动过滤。
 - `pattern_memory`：观察并重复随机闪烁的图标序列。
 - `count_flash`：记住瞬时出现的小规模圆点数量。
-- `market_trade`：在价格曲线低点买入、高点卖出。
+- `market_trade`：右向左滚动的拟真价格曲线，支持单次低买高卖和目标本金模式。
 - `human_check`：Cloudflare Type “我不是机器人”交互检查。
 - `rotate_align`：旋转图形回到正方向。
 - `semantic_pick`：轻量常识与语义选择。
@@ -24,9 +24,11 @@
 UA 轮换；`low` 风险会话为 3 步，`medium/high/critical` 分别为 4/6/8 步。显式指定
 `challengeType` 或使用无障碍模式时保持单步；中间步骤不会签发令牌，最后一步通过后才签发。
 
-服务没有仪表盘，只暴露 Challenge、资源、嵌入页和 `siteverify` 接口。视觉采用紧凑白色
-验证卡、冷灰画布、统一蓝色强调色、44px 触控目标和自动尺寸 iframe。官网顶部横幅会
-根据浏览器语言自动选择中文或英文，并允许用户随时切换。
+服务没有后台仪表盘，只暴露 Challenge、资源、嵌入页和 `siteverify` 接口。验证组件默认
+显示 hCaptcha 风格的固定高紧凑入口，点击后才请求挑战，并在当前层向上展开；验证完成后
+收回为“验证通过”状态，不挤压宿主页面。`/captcha` 使用无会话预览模式，公开题目只取
+完整变式池约 2%，覆盖全部题型但不暴露完整题库。官网顶部横幅会根据浏览器语言自动选择
+中文或英文，并允许用户随时切换。
 
 ## 快速开始
 
@@ -65,6 +67,8 @@ python tests/browser_smoke.py
 成功后会向最近的 `form` 插入名为 `oxygen-token` 的隐藏字段，并触发
 `oxygenchallenge:verified` 事件。可通过 `challenge-type` 固定题型，通过
 `risk` 控制会话步数，通过 `accessible="true"` 强制单步反色无障碍模式。
+没有固定宽度时默认 400px，也可用 `width="360"` 等属性定制宽度；高度保持固定，
+挑战展开层不会改变宿主文档流。
 
 ```html
 <oxygen-challenge
@@ -85,6 +89,7 @@ python tests/browser_smoke.py
 | `POST` | `/v1/challenges` | 创建 JSON Challenge |
 | `GET` | `/embed` | 创建服务端渲染 Widget |
 | `POST` | `/v1/challenges/:id/verify` | 提交答案或交互证据 |
+| `POST` | `/v1/challenges/:id/swap` | 桌面媒体题型换题或切换无障碍替代 |
 | `GET` | `/v1/challenges/:id/overlay.svg` | 反色透明数字图 |
 | `GET` | `/v1/challenges/:id/audio.wav` | DTMF 听觉替代 |
 | `GET` | `/v1/challenges/:id/target.svg` | 网格目标图标 |
@@ -96,6 +101,8 @@ python tests/browser_smoke.py
 | `GET` | `/platform` | OxygenAccount 开放平台 |
 | `GET` | `/auth/login` | OxygenAccount OIDC 登录 |
 | `GET/POST/DELETE` | `/api/platform/apps` | 创建、轮换与停用应用 |
+| `GET` | `/privacy-policy` | 隐私政策 |
+| `GET` | `/user-agreement` | 用户条款 |
 
 嵌入接入：
 
@@ -116,6 +123,8 @@ python tests/browser_smoke.py
 - Challenge ID 为随机 144 bit，默认 300 秒过期，最多 3 次尝试。
 - 反色题正确答案不进入 HTML、DOM、JSON 或 SVG 文本节点。
 - 网格索引、序列、声音答案、计数结果、市场极值和计算结果只保存在服务端。
+- 公开预览不签发 token，也不携带风险会话 ID；风险题仍按 UA、设备类、网络和请求频次升级。
+- 无障碍按钮会实际切换到带 DTMF 音频的反色题，而不是无效刷新。
 - `siteverify` 令牌使用 Ed25519 签名，默认 120 秒有效并原子消费。
 - 风险会话只在最后一步签发令牌，并绑定单个 session/action/site。
 - CORS、Origin/Referer 白名单、CSP、`no-store`、限速和结构化风险日志默认开启。

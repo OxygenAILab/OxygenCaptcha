@@ -12,7 +12,17 @@ const DTMF: Record<string, [number, number]> = {
   "9": [852, 1477],
 };
 
-export type AnimalSound = "cat" | "dog" | "bird";
+export type AnimalSound =
+  | "cat"
+  | "dog"
+  | "bird"
+  | "monkey"
+  | "horse"
+  | "snake"
+  | "bear"
+  | "mouse"
+  | "elephant"
+  | "seal";
 
 function sine(frequency: number, sample: number): number {
   return Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE);
@@ -96,25 +106,69 @@ function animalSample(kind: AnimalSound, sample: number, length: number): number
     );
   }
 
-  const chirpPhase = (seconds * 4.5) % 1;
-  const chirpEnvelope = Math.sin(Math.PI * Math.min(1, chirpPhase * 1.8));
-  const frequency = 1_180 + 1_250 * Math.sin(Math.PI * progress) ** 2;
-  return (
-    edge *
-    chirpEnvelope *
-    (0.32 * Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE) +
-      0.12 * Math.sin((4 * Math.PI * frequency * sample) / SAMPLE_RATE))
-  );
+  if (kind === "bird") {
+    const chirpPhase = (seconds * 4.5) % 1;
+    const chirpEnvelope = Math.sin(Math.PI * Math.min(1, chirpPhase * 1.8));
+    const frequency = 1_180 + 1_250 * Math.sin(Math.PI * progress) ** 2;
+    return (
+      edge *
+      chirpEnvelope *
+      (0.32 * Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE) +
+        0.12 * Math.sin((4 * Math.PI * frequency * sample) / SAMPLE_RATE))
+    );
+  }
+
+  if (kind === "monkey") {
+    const chirp = Math.max(0, Math.sin(2 * Math.PI * 7 * seconds));
+    const frequency = 940 + 520 * Math.sin(Math.PI * progress);
+    return edge * chirp * (0.34 * Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE) + 0.12 * noise(sample));
+  }
+
+  if (kind === "horse") {
+    const pulse = Math.max(0, Math.sin(2 * Math.PI * 2.2 * seconds));
+    return Math.pow(edge, 0.6) * pulse * (0.36 * Math.sin((2 * Math.PI * (150 - 45 * progress) * sample) / SAMPLE_RATE) + 0.1 * noise(sample));
+  }
+
+  if (kind === "snake") {
+    return edge * (0.24 * noise(sample) + 0.08 * Math.sin((2 * Math.PI * (2_200 + 700 * Math.sin(Math.PI * progress)) * sample) / SAMPLE_RATE));
+  }
+
+  if (kind === "bear") {
+    const growl = 0.45 + 0.55 * Math.sin(2 * Math.PI * 1.4 * seconds);
+    return Math.pow(edge, 0.45) * growl * (0.34 * Math.sin((2 * Math.PI * (92 - 18 * progress) * sample) / SAMPLE_RATE) + 0.12 * noise(sample));
+  }
+
+  if (kind === "mouse") {
+    const squeak = Math.max(0, Math.sin(2 * Math.PI * 9 * seconds));
+    return edge * squeak * 0.24 * Math.sin((2 * Math.PI * (1_900 + 1_100 * Math.sin(Math.PI * progress)) * sample) / SAMPLE_RATE);
+  }
+
+  if (kind === "elephant") {
+    const trumpet = Math.max(0, Math.sin(2 * Math.PI * 1.2 * seconds));
+    return Math.pow(edge, 0.5) * trumpet * (0.4 * Math.sin((2 * Math.PI * (240 + 180 * Math.sin(Math.PI * progress)) * sample) / SAMPLE_RATE) + 0.08 * noise(sample));
+  }
+
+  const bark = Math.max(0, Math.sin(2 * Math.PI * 4.2 * seconds));
+  return Math.pow(edge, 0.55) * bark * (0.35 * Math.sin((2 * Math.PI * (310 - 70 * progress) * sample) / SAMPLE_RATE) + 0.16 * noise(sample));
 }
 
 export function renderAnimalSequenceWave(animals: readonly AnimalSound[]): Buffer {
   const gapSamples = Math.round(SAMPLE_RATE * 0.16);
   const leadingSilence = Math.round(SAMPLE_RATE * 0.08);
+  const durations: Record<AnimalSound, number> = {
+    cat: 0.62,
+    dog: 0.42,
+    bird: 0.34,
+    monkey: 0.4,
+    horse: 0.48,
+    snake: 0.36,
+    bear: 0.5,
+    mouse: 0.3,
+    elephant: 0.55,
+    seal: 0.44,
+  };
   const callSamples = animals.map((animal) =>
-    Math.round(
-      SAMPLE_RATE *
-        (animal === "cat" ? 0.62 : animal === "dog" ? 0.42 : 0.34),
-    ),
+    Math.round(SAMPLE_RATE * durations[animal]),
   );
   const totalSamples =
     leadingSilence +

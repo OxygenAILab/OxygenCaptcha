@@ -142,6 +142,57 @@ function platformHtml(config: AppConfig): string {
     .error { background:#fff0ef; color:#b42318; }
     .loading { color:var(--muted); }
     @media (max-width:800px){ .layout{grid-template-columns:1fr}.sidebar{position:static}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.app-row{grid-template-columns:1fr}.app-actions{flex-wrap:wrap}.topbar{padding:0 16px}.layout{width:calc(100% - 28px)} }
+    .platform-page { width:min(1180px,calc(100% - 40px)); margin:0 auto; padding:54px 0 88px; }
+    .topbar .brand { color:#182130; text-decoration:none; }
+    .platform-intro { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:28px; align-items:end; margin-bottom:26px; padding-bottom:26px; border-bottom:1px solid rgba(23,32,51,.12); }
+    .platform-intro p { max-width:620px; margin:10px 0 0; color:#68748a; font-size:15px; line-height:1.75; }
+    .platform-intro h1 { margin:0; font:700 clamp(38px,5vw,58px)/1 Georgia,"Songti SC",serif; letter-spacing:-.02em; }
+    .platform-state { display:grid; gap:6px; min-width:180px; padding-left:20px; border-left:1px solid #d7dee9; color:#68748a; font-size:12px; }
+    .platform-state strong { color:#182130; font:700 16px/1.3 Georgia,"Songti SC",serif; }
+    .platform-root-panel { border:0; background:transparent; padding:0; }
+    .workspace-grid { display:grid; grid-template-columns:minmax(0,1fr) 286px; gap:30px; align-items:start; }
+    .workspace-main { min-width:0; }
+    .workspace-side { position:sticky; top:94px; display:grid; gap:18px; }
+    .section-heading { display:flex; justify-content:space-between; gap:20px; align-items:flex-end; margin-bottom:18px; }
+    .section-heading h2 { margin:0; font:700 28px/1.2 Georgia,"Songti SC",serif; }
+    .section-heading p { margin:7px 0 0; color:#68748a; font-size:13px; line-height:1.65; }
+    .metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin-bottom:28px; border:1px solid #d7dee9; background:#fff; }
+    .metric { padding:18px 20px; border-right:1px solid #e4e9f0; }
+    .metric:last-child { border-right:0; }
+    .metric span { display:block; color:#7a8699; font-size:11px; font-weight:700; }
+    .metric strong { display:block; margin-top:8px; color:#182130; font:700 24px/1 Georgia,"Songti SC",serif; font-variant-numeric:tabular-nums; }
+    .create-panel { margin-bottom:24px; border:1px solid #cfd8e4; background:#fff; }
+    .create-panel summary { padding:16px 18px; color:#263246; font-size:14px; font-weight:750; cursor:pointer; list-style:none; }
+    .create-panel summary::-webkit-details-marker { display:none; }
+    .create-panel summary::after { float:right; content:"+"; color:#2364e8; font-size:18px; line-height:1; }
+    .create-panel[open] summary { border-bottom:1px solid #e4e9f0; }
+    .create-panel[open] summary::after { content:"−"; }
+    .create-panel .form-grid { margin:0; padding:20px; }
+    .app-list { display:grid; gap:0; margin-top:0; border-top:1px solid #d7dee9; }
+    .app-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:22px; padding:22px 0; border:0; border-bottom:1px solid #d7dee9; border-radius:0; background:transparent; }
+    .app-row h3 { margin:0 0 8px; font:700 19px/1.3 Georgia,"Songti SC",serif; }
+    .app-row code { display:inline-flex; max-width:100%; padding:5px 7px; overflow:auto; border:1px solid #dde4ee; border-radius:4px; background:#f6f8fb; color:#315a9f; font:12px "Cascadia Code",Consolas,monospace; }
+    .app-meta { margin-top:8px; color:#748094; font-size:12px; line-height:1.6; }
+    .app-actions { display:flex; align-items:flex-start; gap:8px; }
+    .side-panel { border-top:3px solid #182130; background:#fff; padding:20px; }
+    .side-panel h3 { margin:0 0 12px; font:700 19px/1.3 Georgia,"Songti SC",serif; }
+    .side-panel p { margin:0 0 14px; color:#68748a; font-size:12px; line-height:1.7; }
+    .side-panel code { display:block; padding:10px; overflow:auto; border:1px solid #e0e6ee; background:#f7f9fc; color:#315a9f; font:11px/1.55 "Cascadia Code",Consolas,monospace; }
+    .side-links { display:grid; gap:1px; margin-top:16px; background:#e4e9f0; border:1px solid #e4e9f0; }
+    .side-links a { display:flex; align-items:center; gap:8px; padding:10px 12px; background:#fff; color:#35445c; font-size:12px; font-weight:650; text-decoration:none; }
+    .side-links a:hover { color:#2364e8; }
+    .login-view { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,420px); gap:56px; align-items:center; min-height:380px; padding:22px 0; }
+    .login-copy h2 { margin:0; font:700 clamp(36px,5vw,54px)/1.05 Georgia,"Songti SC",serif; }
+    .login-copy p { max-width:560px; margin:18px 0 0; color:#68748a; font-size:15px; line-height:1.78; }
+    .login-box { padding:28px; border:1px solid #d7dee9; background:#fff; box-shadow:0 18px 40px rgba(23,32,51,.08); }
+    .login-box .button { width:100%; }
+    .button svg,.app-actions svg { width:16px; height:16px; }
+    .button { gap:8px; }
+    .secret { display:grid; gap:10px; }
+    .secret code { white-space:normal; word-break:break-all; }
+    .account-name { color:#35445c; font-size:12px; }
+    .notice { border-radius:0; }
+    @media (max-width:900px){ .workspace-grid,.login-view{grid-template-columns:1fr}.workspace-side{position:static}.platform-intro{grid-template-columns:1fr}.platform-state{padding-left:0;border-left:0}.metrics{grid-template-columns:1fr}.metric{border-right:0;border-bottom:1px solid #e4e9f0}.metric:last-child{border-bottom:0} }
   </style>
 </head>
 <body data-platform-enabled="${enabled ? "1" : "0"}" data-login-url="/auth/login">
@@ -157,13 +208,19 @@ function platformHtml(config: AppConfig): string {
       <a class="button secondary hidden" id="logout-link" href="/auth/logout">退出</a>
     </div>
   </header>
-  <main class="layout">
-    <aside class="sidebar">
-      <h1>开放平台</h1>
-      <p>使用 OxygenAccount 登录，创建站点应用，并获取 captcha API 的 site key 与 secret。</p>
-      <a class="nav-item" href="/">返回官网</a>
-    </aside>
-    <section class="panel" id="platform-root">
+  <main class="platform-page">
+    <header class="platform-intro">
+      <div>
+        <h1>开放平台</h1>
+        <p>通过 OxygenAccount 登录，管理 OxygenChallenge 应用、允许来源、动作范围与 API 凭据。site key 用于浏览器嵌入，secret 仅保存在你的服务端。</p>
+      </div>
+      <div class="platform-state">
+        <span>API</span>
+        <strong>v1</strong>
+        <span>captcha.oxygenai.top</span>
+      </div>
+    </header>
+    <section class="panel platform-root-panel" id="platform-root">
       <div class="loading">正在读取登录状态…</div>
     </section>
   </main>

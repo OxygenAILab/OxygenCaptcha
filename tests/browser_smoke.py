@@ -19,6 +19,7 @@ def embed_url(
     challenge_type: str | None = None,
     accessible: bool = False,
     risk: str | None = None,
+    entry: bool = False,
 ) -> str:
     query = {
         "sitekey": SITE_KEY,
@@ -32,6 +33,8 @@ def embed_url(
     if risk:
         query["risk"] = risk
     query["test"] = "1"
+    if not entry:
+        query["launch"] = "1"
     return f"{BASE}/embed?{urlencode(query)}"
 
 
@@ -155,12 +158,16 @@ def solve_motion(page: Page, submit: bool = True) -> None:
     x, y = canvas_target(page)
     page.mouse.move(x, y)
     page.mouse.down()
-    deadline = time.monotonic() + 2.5
+    started = time.monotonic()
+    deadline = time.monotonic() + 8.0
     while time.monotonic() < deadline:
         page.wait_for_timeout(40)
         x, y = canvas_target(page)
         page.mouse.move(x, y)
-        if page.locator("#oc-submit").is_enabled():
+        if (
+            page.locator("#oc-submit").is_enabled()
+            and time.monotonic() - started >= 4.4
+        ):
             break
     page.mouse.up()
     assert page.locator("#oc-submit").is_enabled(), "motion coverage never unlocked submit"
@@ -198,9 +205,11 @@ def solve_pattern(page: Page, state: dict, submit: bool = True) -> None:
 def solve_key_pointer(page: Page, state: dict, submit: bool = True) -> None:
     required_distance = state["keyPointer"]["requiredDistance"]
     required_hold = state["keyPointer"]["requiredHoldMs"]
+    required_key = state["keyPointer"]["requiredKey"]
+    keyboard_key = "Space" if required_key == "Space" else required_key.removeprefix("Key")
     track = page.locator("#oc-gesture-track").bounding_box()
     assert track
-    page.keyboard.down("Space")
+    page.keyboard.down(keyboard_key)
     page.mouse.move(track["x"] + 28, track["y"] + track["height"] / 2)
     page.mouse.down()
     page.mouse.move(
@@ -210,7 +219,7 @@ def solve_key_pointer(page: Page, state: dict, submit: bool = True) -> None:
     )
     page.wait_for_timeout(required_hold + 250)
     page.mouse.up()
-    page.keyboard.up("Space")
+    page.keyboard.up(keyboard_key)
     assert page.locator("#oc-submit").is_enabled()
     if submit:
         page.locator("#oc-submit").click()
@@ -233,13 +242,57 @@ def solve_market(page: Page, state: dict, submit: bool = True) -> None:
     assert canvas
     padding = 18
     count = len(market["prices"])
+    ratio = market["buyBandRatio"]
+    sorted_prices = sorted(market["prices"])
+    buy_limit = sorted_prices[max(0, math.floor(count * ratio) - 1)]
+    sell_limit = sorted_prices[min(count - 1, math.ceil(count * (1 - ratio)))]
+    trades: list[tuple[int, int]] = []
+    capital = float(market.get("initialCapital") or 1000)
+    target = float(market.get("targetCapital") or 0)
+    previous_sell = -1
+    for buy_index, buy_price in enumerate(market["prices"]):
+        if buy_index <= previous_sell or buy_price > buy_limit:
+            continue
+        for sell_index in range(buy_index + 1, count):
+            sell_price = market["prices"][sell_index]
+            if sell_price < sell_limit:
+                continue
+            trades.append((buy_index, sell_index))
+            capital *= sell_price / buy_price
+            previous_sell = sell_index
+            break
+        if market["mode"] == "single" or (
+            market["mode"] == "target" and capital >= target
+        ):
+            break
+    if market["mode"] == "single":
+        trades = trades[:1]
+    assert trades, "market seed has no valid trade"
+    if market["mode"] == "target":
+        assert capital >= target, (capital, target)
+
+    page.wait_for_function(
+        "(count) => Number(document.querySelector('#oc-market-canvas')?.dataset.visibleTo) === count - 1",
+        arg=count,
+        timeout=18_000,
+    )
+    metrics = page.locator("#oc-market-canvas").evaluate(
+        """(canvas) => ({
+          width: Number(canvas.dataset.canvasWidth),
+          step: Number(canvas.dataset.step),
+          padding: Number(canvas.dataset.padding)
+        })"""
+    )
 
     def x_for(index: int) -> float:
-        return canvas["x"] + padding + (index / max(1, count - 1)) * (canvas["width"] - padding * 2)
+        internal_x = metrics["padding"] + index * metrics["step"]
+        return canvas["x"] + (internal_x / metrics["width"]) * canvas["width"]
 
-    page.locator("#oc-market-buy").click()
-    page.mouse.click(x_for(market["buyIndex"]), canvas["y"] + canvas["height"] / 2)
-    page.mouse.click(x_for(market["sellIndex"]), canvas["y"] + canvas["height"] / 2)
+    for buy_index, sell_index in trades:
+        page.locator("#oc-market-buy").click()
+        page.mouse.click(x_for(buy_index), canvas["y"] + canvas["height"] / 2)
+        page.mouse.click(x_for(sell_index), canvas["y"] + canvas["height"] / 2)
+        page.wait_for_timeout(80)
     assert page.locator("#oc-submit").is_enabled()
     if submit:
         page.locator("#oc-submit").click()
@@ -339,7 +392,7 @@ def screenshot_type(browser: Browser, challenge_type: str, viewport_name: str, v
     if challenge_type == "motion_drag":
         assert page.locator("#oc-motion-canvas").is_visible()
     if challenge_type == "audio_sequence":
-        assert page.locator(".oc-choice").count() == 3
+        assert page.locator(".oc-choice").count() == 4
         assert page.locator("#oc-play-sequence").is_visible()
     if challenge_type == "calculation":
         assert page.locator("#oc-expression").inner_text().count("×") == 2
@@ -484,24 +537,7 @@ def run_key_pointer_checks(browser: Browser) -> None:
     page, errors = open_page(browser, {"width": 900, "height": 760}, reduced_motion="no-preference")
     page.goto(embed_url("key_pointer"), wait_until="networkidle")
     state = challenge_state(page)
-    required_distance = state["keyPointer"]["requiredDistance"]
-    required_hold = state["keyPointer"]["requiredHoldMs"]
-    track = page.locator("#oc-gesture-track").bounding_box()
-    assert track
-    page.keyboard.down("Space")
-    page.mouse.move(track["x"] + 28, track["y"] + track["height"] / 2)
-    page.mouse.down()
-    page.mouse.move(
-        track["x"] + min(track["width"] - 28, 30 + required_distance),
-        track["y"] + track["height"] / 2,
-        steps=8,
-    )
-    page.wait_for_timeout(required_hold + 250)
-    page.mouse.up()
-    page.keyboard.up("Space")
-    assert page.locator("#oc-submit").is_enabled(), "key-pointer gesture never unlocked submit"
-    page.locator("#oc-submit").click()
-    wait_for_status(page, "验证成功")
+    solve_key_pointer(page, state, submit=True)
     page.screenshot(path=str(OUT / "desktop-key-pointer-success.png"), full_page=True)
     assert not errors, errors
 
@@ -615,16 +651,18 @@ def run_site_checks(browser: Browser) -> None:
         page.locator(f'[data-language="{target}"]').click()
         switched = page.locator("h1").inner_text()
         assert ("Verify behavior" in switched) if target == "en" else ("验证行为" in switched)
-        hero = page.locator(".hero-media")
-        assert hero.is_visible()
-        assert hero.evaluate("(image) => image.naturalWidth") > 0
+        assert page.locator(".hero-media").count() == 0
+        assert page.locator(".hero-signal").is_visible()
         assert_no_horizontal_overflow(page)
         page.screenshot(path=str(OUT / f"{viewport_name}-official-site.png"), full_page=True)
         assert not errors, errors
 
     captcha, captcha_errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
     captcha.goto(f"{BASE}/captcha", wait_until="networkidle")
-    captcha.locator(".oc-shell").wait_for()
+    captcha.locator("#oc-entry-check").wait_for()
+    captcha.screenshot(path=str(OUT / "desktop-captcha-entry.png"), full_page=True)
+    captcha.locator("#oc-entry-check").click()
+    captcha.locator(".oc-card").wait_for(timeout=10_000)
     challenge_type = captcha.locator("body").get_attribute("data-challenge-type")
     assert challenge_type
     captcha.screenshot(path=str(OUT / "desktop-captcha-random.png"), full_page=True)
@@ -635,6 +673,21 @@ def run_site_checks(browser: Browser) -> None:
     assert platform.locator(".panel").is_visible()
     platform.screenshot(path=str(OUT / "desktop-platform.png"), full_page=True)
     assert not platform_errors, platform_errors
+
+    for path, heading in (
+        ("/privacy-policy", "隐私政策"),
+        ("/user-agreement", "用户协议"),
+    ):
+        legal, legal_errors = open_page(browser, {"width": 900, "height": 760})
+        legal.goto(f"{BASE}{path}", wait_until="networkidle")
+        assert legal.locator("#legal-title").inner_text() == heading
+        assert legal.locator("#legal-banner").is_visible()
+        assert_no_horizontal_overflow(legal)
+        legal.screenshot(
+            path=str(OUT / f"desktop-{path.strip('/')}.png"),
+            full_page=True,
+        )
+        assert not legal_errors, legal_errors
 
 
 def solve_current(page: Page, state: dict, submit: bool = True) -> None:
@@ -699,8 +752,11 @@ def run_risk_session(browser: Browser) -> None:
             page.locator("#oc-form").wait_for()
             page.wait_for_load_state("networkidle")
         else:
-            wait_for_status(page, "验证成功")
-    assert page.locator(".oc-progress").inner_text().strip() == f"{total_steps} / {total_steps}"
+            page.wait_for_function(
+                "() => document.querySelector('.oc-entry-label')?.textContent.includes('验证通过')",
+                timeout=15_000,
+            )
+    assert page.locator(".oc-entry-label").inner_text().strip() == "验证通过"
     page.screenshot(path=str(OUT / "desktop-risk-session-success.png"), full_page=True)
     assert not errors, errors
 
@@ -745,6 +801,12 @@ button{{min-height:44px;margin-top:12px}}
     assert iframe_handle
     frame = iframe_handle.content_frame()
     assert frame
+    frame.wait_for_selector("#oc-entry-check", state="visible")
+    initial_iframe_height = widget.evaluate(
+        "(el) => el.shadowRoot.querySelector('iframe').getBoundingClientRect().height"
+    )
+    assert 90 <= initial_iframe_height <= 110, initial_iframe_height
+    frame.locator("#oc-entry-check").click()
     frame.wait_for_selector("#oc-form", state="visible")
     identifier = frame.locator(".oc-shell").get_attribute("data-challenge-id")
     assert identifier
@@ -769,10 +831,18 @@ button{{min-height:44px;margin-top:12px}}
         "(el) => el.querySelector('input[name=\"oxygen-token\"]')?.value"
     )
     assert token and token.count(".") == 2, token
+    host.wait_for_function(
+        """() => {
+          const iframe = document.querySelector('oxygen-challenge')
+            ?.shadowRoot?.querySelector('iframe');
+          return iframe ? iframe.getBoundingClientRect().height <= 110 : false;
+        }""",
+        timeout=5_000,
+    )
     iframe_height = widget.evaluate(
         "(el) => el.shadowRoot.querySelector('iframe').getBoundingClientRect().height"
     )
-    assert 360 <= iframe_height <= 720, iframe_height
+    assert 90 <= iframe_height <= 110, iframe_height
     host.screenshot(path=str(OUT / "desktop-host.png"), full_page=True)
     context.close()
 
@@ -812,6 +882,8 @@ with sync_playwright() as playwright:
         "speech_wave",
     ):
         for viewport_name, viewport in viewports.items():
+            if viewport_name == "mobile" and challenge_type == "key_pointer":
+                continue
             screenshot_type(browser, challenge_type, viewport_name, viewport)
 
     run_inverse_checks(browser)

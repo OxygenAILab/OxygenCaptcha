@@ -1,12 +1,14 @@
 import { randomInt } from "node:crypto";
 import type { MotionState } from "./types.js";
 
-export function createMotion(): MotionState {
+export function createMotion(seed = randomInt(1, 2_147_483_647)): MotionState {
   return {
-    seed: randomInt(1, 2_147_483_647),
+    seed,
     width: 360,
     height: 150,
-    durationMs: 9_000,
+    durationMs: 20_000,
+    requiredCoverageMs: 1_800,
+    targetRadius: 32,
   };
 }
 
@@ -26,8 +28,13 @@ export function motionTarget(motion: MotionState, elapsedMs: number): { x: numbe
 export function validMotionPoint(
   motion: MotionState,
   point: { x: number; y: number; elapsedMs: number },
+  coverageMs = 0,
 ): boolean {
-  if (point.elapsedMs < 800 || point.elapsedMs > motion.durationMs) {
+  if (
+    point.elapsedMs < 4_000 ||
+    point.elapsedMs > motion.durationMs ||
+    coverageMs < motion.requiredCoverageMs
+  ) {
     return false;
   }
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
@@ -35,5 +42,5 @@ export function validMotionPoint(
   }
   const target = motionTarget(motion, point.elapsedMs);
   const distance = Math.hypot(point.x - target.x, point.y - target.y);
-  return distance <= 38;
+  return distance <= motion.targetRadius;
 }

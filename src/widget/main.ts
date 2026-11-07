@@ -12,8 +12,8 @@ const SOURCE_ORIGIN = scriptOrigin();
 
 function inlineWidgetStyle(): string {
   return [
-    ":host{display:block;max-width:420px;width:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
-    "iframe{display:block;width:100%;height:420px;min-height:360px;border:0;border-radius:8px;background:transparent}",
+    ":host{position:relative;z-index:2147483000;display:block;width:var(--oc-width,400px);max-width:100%;height:96px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
+    "iframe{position:absolute;left:0;bottom:0;display:block;width:100%;height:96px;border:0;border-radius:0;background:transparent}",
     ".oc-error{padding:16px;border:1px solid rgba(127,29,29,.35);border-radius:8px;color:#7f1d1d;background:#fef2f2;font:14px/1.5 system-ui,sans-serif}",
   ].join("");
 }
@@ -35,6 +35,7 @@ class OxygenChallengeElement extends HTMLElement {
     this.hiddenInput?.remove();
     this.hiddenInput = null;
     if (this.frame) {
+      this.frame.style.height = "96px";
       this.frame.src = this.frameSource();
     }
   }
@@ -55,6 +56,10 @@ class OxygenChallengeElement extends HTMLElement {
     this.frame.referrerPolicy = "strict-origin-when-cross-origin";
     this.frame.allow = "autoplay; camera; microphone";
     this.frame.src = this.frameSource();
+    const width = Number.parseFloat(this.getAttribute("width") ?? "");
+    if (Number.isFinite(width)) {
+      this.style.setProperty("--oc-width", `${Math.max(280, Math.min(600, width))}px`);
+    }
     shadow.append(this.frame);
     window.addEventListener("message", this.onMessage);
   }
@@ -71,12 +76,24 @@ class OxygenChallengeElement extends HTMLElement {
     url.searchParams.set("action", action);
     url.searchParams.set("parentOrigin", location.origin);
     if (
-      challengeType === "inverse_occlusion" ||
-      challengeType === "grid_select" ||
-      challengeType === "motion_drag" ||
-      challengeType === "audio_sequence" ||
-      challengeType === "calculation" ||
-      challengeType === "key_pointer"
+      challengeType &&
+      [
+        "inverse_occlusion",
+        "grid_select",
+        "motion_drag",
+        "audio_sequence",
+        "calculation",
+        "key_pointer",
+        "pattern_memory",
+        "count_flash",
+        "market_trade",
+        "human_check",
+        "rotate_align",
+        "semantic_pick",
+        "turnstile",
+        "hand_motion",
+        "speech_wave",
+      ].includes(challengeType)
     ) {
       url.searchParams.set("challengeType", challengeType);
     }
@@ -102,6 +119,7 @@ class OxygenChallengeElement extends HTMLElement {
       token?: string;
       code?: string;
       height?: number;
+      compact?: boolean;
       step?: number;
       totalSteps?: number;
     };
@@ -110,9 +128,17 @@ class OxygenChallengeElement extends HTMLElement {
     }
 
     if (data.type === "resize" && typeof data.height === "number") {
-      const height = Math.max(360, Math.min(720, Math.ceil(data.height)));
+      const height = Math.max(96, Math.min(760, Math.ceil(data.height)));
       if (this.frame) {
         this.frame.style.height = `${height}px`;
+        if (data.compact === true || height <= 96) {
+          this.frame.style.bottom = "0";
+        } else {
+          const rect = this.getBoundingClientRect();
+          const availableAbove = Math.max(96, rect.bottom - 8);
+          const downwardShift = Math.max(0, height - availableAbove);
+          this.frame.style.bottom = downwardShift > 0 ? `${-downwardShift}px` : "0";
+        }
       }
     } else if (data.type === "step") {
       this.dispatchEvent(

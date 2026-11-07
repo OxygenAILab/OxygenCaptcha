@@ -1,6 +1,6 @@
 # OxygenChallenge API
 
-版本：`26.0.0-alpha.4`
+版本：`26.0.0-alpha.5`
 
 ## 先决条件
 
@@ -43,10 +43,10 @@
 | `motion_drag` | 拖动遮罩持续覆盖移动目标 |
 | `audio_sequence` | 听取声音序列并选择目标动物 |
 | `calculation` | 输入大数四则运算结果 |
-| `key_pointer` | 同时按住空格键并向右拖动 |
+| `key_pointer` | 同时按住随机指定按键并向右拖动；移动端自动过滤 |
 | `pattern_memory` | 观察并重复闪烁图标序列 |
 | `count_flash` | 记住短暂显示的圆点数量 |
-| `market_trade` | 在曲线低点买入、高点卖出 |
+| `market_trade` | 在滚动曲线区间低买高卖，或累计达到目标本金 |
 | `human_check` | 点击“我不是机器人”并满足最短交互停留 |
 | `rotate_align` | 将图形旋转回正方向 |
 | `semantic_pick` | 选择符合问题的语义选项 |
@@ -55,6 +55,24 @@
 | `speech_wave` | 多遍朗读并比较目标字词窗口 |
 
 `accessible: true` 会强制使用 `inverse_occlusion`，并提供 DTMF 音频替代。
+
+### 公开预览
+
+`GET /captcha` 先返回紧凑入口；点击后请求 `GET /captcha?launch=1` 创建无 session ID、
+无验证 token 的单题预览。预览覆盖全部题型，但每个题型只选择完整变式池中约 2% 的固定
+代表变式，因此可以无限练习而不公开完整题库。预览通过后只返回：
+
+```json
+{
+  "verified": true,
+  "preview": true,
+  "action": "submit",
+  "siteKey": "oc_public_demo",
+  "type": "grid_select"
+}
+```
+
+预览结果不能用于 `/v1/siteverify`。
 
 公共字段：
 
@@ -68,6 +86,9 @@
   "step": 1,
   "totalSteps": 3,
   "risk": "low",
+  "deviceClass": "desktop",
+  "preview": false,
+  "swapAllowed": false,
   "expiresAt": "2026-11-07T00:10:00.000Z",
   "maxAttempts": 3,
   "prompt": "选择所有包含“奖杯”的图标"
@@ -114,7 +135,9 @@
     "seed": 123456,
     "width": 360,
     "height": 150,
-    "durationMs": 9000
+    "durationMs": 20000,
+    "requiredCoverageMs": 1800,
+    "targetRadius": 32
   }
 }
 ```
@@ -128,7 +151,8 @@
   "options": [
     { "key": "cat", "label": "猫" },
     { "key": "dog", "label": "狗" },
-    { "key": "bird", "label": "鸟" }
+    { "key": "bird", "label": "鸟" },
+    { "key": "horse", "label": "马" }
   ]
 }
 ```
@@ -152,7 +176,9 @@
 {
   "type": "key_pointer",
   "requiredDistance": 183,
-  "requiredHoldMs": 824
+  "requiredHoldMs": 824,
+  "requiredKey": "KeyF",
+  "requiredKeyLabel": "F"
 }
 ```
 
@@ -190,7 +216,12 @@
   "market": {
     "seed": 123456,
     "width": 360,
-    "height": 156
+    "height": 156,
+    "mode": "target",
+    "sampleMs": 250,
+    "durationMs": 15000,
+    "initialCapital": 1000,
+    "targetCapital": 1110
   }
 }
 ```
@@ -243,7 +274,7 @@ Cloudflare `siteverify` 在服务端确认。
 {
   "type": "hand_motion",
   "handMotion": {
-    "sequence": ["open", "peace", "fist"],
+    "sequence": ["thumb_up", "peace", "point_up"],
     "holdMs": 450
   }
 }
@@ -291,8 +322,9 @@ Cloudflare `siteverify` 在服务端确认。
   "point": {
     "x": 182.4,
     "y": 73.8,
-    "elapsedMs": 1200
-  }
+    "elapsedMs": 5200
+  },
+  "coverageMs": 1800
 }
 ```
 
@@ -313,7 +345,8 @@ Cloudflare `siteverify` 在服务端确认。
 ```json
 {
   "holdMs": 824,
-  "distance": 183
+  "distance": 183,
+  "keyCode": "KeyF"
 }
 ```
 
@@ -327,11 +360,14 @@ Cloudflare `siteverify` 在服务端确认。
 
 ```json
 {
-  "market": {
-    "buyIndex": 24,
-    "sellIndex": 84
-  }
+  "marketTrades": [
+    { "buyIndex": 4, "sellIndex": 15 },
+    { "buyIndex": 24, "sellIndex": 37 }
+  ]
 }
+
+alpha.4 客户端继续发送 `{ "market": { "buyIndex": 24, "sellIndex": 84 } }`
+时，服务端会包装成单笔 `marketTrades`，保持兼容。
 ```
 
 基础检查、方向、Turnstile 与媒体证据：
@@ -402,7 +438,7 @@ Cloudflare `siteverify` 在服务端确认。
     "challengeId": "next-one-time-id",
     "type": "audio_sequence"
   },
-  "nextEmbedUrl": "https://captcha.oxygenai.top/embed?session=..."
+  "nextEmbedUrl": "https://captcha.oxygenai.top/embed?session=...&launch=1"
 }
 ```
 
@@ -430,6 +466,7 @@ Cloudflare `siteverify` 在服务端确认。
 | `GET` | `/v1/challenges/:id/target.svg` | 网格目标图 |
 | `GET` | `/v1/challenges/:id/tile/:index.svg` | 0 到 8 的网格项 |
 | `GET` | `/v1/challenges/:id/sequence.wav` | 动物声音序列 |
+| `POST` | `/v1/challenges/:id/swap` | 桌面媒体题换题；`accessible:true` 切换反色听觉替代 |
 
 资源响应均为 `no-store`，Challenge 过期、已消费或题型不匹配时返回 HTTP 410。
 

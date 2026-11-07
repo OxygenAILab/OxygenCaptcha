@@ -6,6 +6,9 @@ OxygenAccount 登录后可以创建应用、配置精确 origin 与 action，并
 - `siteKey`：公开嵌入，可以出现在浏览器页面。
 - `secret`：只在创建或轮换后显示一次；必须保存在客户服务端，用于 `siteverify`。
 
+平台 UI 使用与官网一致的工作台布局：应用数量、允许来源和动作范围概览，应用凭据列表，
+以及创建表单和接入文档入口。登录页、应用页和凭据展示均支持中英文切换。
+
 ## OAuth / OIDC 流程
 
 开放平台采用 Authorization Code + PKCE：
