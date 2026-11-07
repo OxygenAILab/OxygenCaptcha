@@ -142,6 +142,7 @@ function platformHtml(config: AppConfig): string {
     .error { background:#fff0ef; color:#b42318; }
     .loading { color:var(--muted); }
     @media (max-width:800px){ .layout{grid-template-columns:1fr}.sidebar{position:static}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.app-row{grid-template-columns:1fr}.app-actions{flex-wrap:wrap}.topbar{padding:0 16px}.layout{width:calc(100% - 28px)} }
+    a { color:inherit; text-decoration:none; }
     .platform-page { width:min(1180px,calc(100% - 40px)); margin:0 auto; padding:54px 0 88px; }
     .topbar .brand { color:#182130; text-decoration:none; }
     .platform-intro { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:28px; align-items:end; margin-bottom:26px; padding-bottom:26px; border-bottom:1px solid rgba(23,32,51,.12); }
@@ -224,7 +225,7 @@ function platformHtml(config: AppConfig): string {
       <div class="loading">正在读取登录状态…</div>
     </section>
   </main>
-  <script defer src="/platform.js"></script>
+  <script defer src="/platform.js?v=26.0.0-alpha.6"></script>
 </body>
 </html>`;
 }

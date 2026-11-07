@@ -7,7 +7,11 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
-import { renderAnimalSequenceWave, renderDtmfWave } from "./audio.js";
+import {
+  renderAnimalSequenceWave,
+  renderDtmfWave,
+  type AnimalSound,
+} from "./audio.js";
 import { ChallengeStore, RISK_STEPS, type VerificationResult } from "./challenge.js";
 import { loadConfig } from "./config.js";
 import { renderGridItemSvg, renderTargetSvg } from "./grid.js";
@@ -48,6 +52,8 @@ const CHALLENGE_TYPES = [
 
 const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 const API_VERSION = "1";
+const APP_VERSION = "v26.0-alpha.6";
+const ASSET_VERSION = "26.0.0-alpha.6";
 
 const createSchema = z.object({
   siteKey: z.string().min(3).max(128),
@@ -167,23 +173,6 @@ function deviceClassFor(request: FastifyRequest): "desktop" | "mobile" {
   return "desktop";
 }
 
-function highlightedText(value: string, targets: string[]): string {
-  if (targets.length === 0) {
-    return escapeHtml(value);
-  }
-  const escapedTargets = targets
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length)
-    .map((target) => target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`(${escapedTargets.join("|")})`, "g");
-  return value
-    .split(pattern)
-    .map((part) =>
-      targets.includes(part) ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part),
-    )
-    .join("");
-}
-
 function gestureLabel(action: HandMotionAction): string {
   const labels: Record<string, string> = {
     open: "张开手掌",
@@ -258,7 +247,7 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
   if (state.type === "audio_sequence" && state.audioSequence) {
     return {
       ...common,
-      prompt: "听音频，选择猫叫之后的第一个动物",
+      prompt: `听音频，选择${state.audioSequence.anchorLabel}之后的下一个声音`,
       audioUrl: `${base}/v1/challenges/${state.id}/sequence.wav`,
       options: state.audioSequence.options,
     };
@@ -441,18 +430,20 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     const options = state.audioSequence.options
       .map(
         (option) => `
-          <button class="oc-choice" type="button" data-choice="${escapeHtml(option.key)}" aria-pressed="false">
-            <span class="oc-choice-icon" aria-hidden="true"></span>
-            <span class="oc-choice-label">${escapeHtml(option.label)}</span>
+          <div class="oc-choice" data-choice="${escapeHtml(option.key)}">
+            <button class="oc-choice-select" type="button" aria-pressed="false">
+              <span class="oc-choice-label">${escapeHtml(option.label)}</span>
+            </button>
+            <button class="oc-choice-preview" type="button" data-preview="${escapeHtml(option.key)}" aria-label="试听${escapeHtml(option.label)}" title="试听${escapeHtml(option.label)}"></button>
             <span class="oc-choice-check" aria-hidden="true"></span>
-          </button>`,
+          </div>`,
       )
       .join("");
     return `
       <div class="oc-prompt-row">
         <div>
           <p class="oc-kicker">安全验证</p>
-          <p class="oc-prompt" id="oc-prompt">听音频，选择猫叫之后的第一个动物</p>
+          <p class="oc-prompt" id="oc-prompt">听音频，选择${escapeHtml(state.audioSequence.anchorLabel)}之后的下一个声音</p>
         </div>
         <span class="oc-difficulty">音频</span>
       </div>
@@ -708,6 +699,15 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
         <span class="oc-media-icon" aria-hidden="true"></span>
         <span>启用摄像头并开始</span>
       </button>
+      <div class="oc-hand-progress" id="oc-hand-progress" hidden>
+        <div class="oc-hand-progress-meta">
+          <span id="oc-hand-progress-label">准备手势识别</span>
+          <output id="oc-hand-progress-value">0%</output>
+        </div>
+        <div class="oc-hand-progress-track" id="oc-hand-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <span id="oc-hand-progress-fill"></span>
+        </div>
+      </div>
       <p class="oc-helper" id="oc-hand-help">请让手部完整出现在画面中。</p>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
@@ -729,11 +729,9 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
         <span class="oc-difficulty">${state.speechWave.takeCount} 遍</span>
       </div>
       <div class="oc-speech-phrase" id="oc-speech-phrase"
-           data-take-count="${state.speechWave.takeCount}"
-           data-focus-start="${state.speechWave.focusStart}"
-           data-focus-end="${state.speechWave.focusEnd}">${highlightedText(state.speechWave.phrase, state.speechWave.targetWords)}</div>
+           data-take-count="${state.speechWave.takeCount}">${escapeHtml(state.speechWave.phrase)}</div>
       <div class="oc-speech-takes" id="oc-speech-takes">${takes}</div>
-      <canvas class="oc-speech-wave" id="oc-speech-wave" width="360" height="72" aria-label="麦克风波形"></canvas>
+      <canvas class="oc-speech-wave" id="oc-speech-wave" width="360" height="72" aria-label="录音反馈"></canvas>
       <button class="oc-media-button" id="oc-speech-record" type="button">
         <span class="oc-media-icon" aria-hidden="true"></span>
         <span>录制第 1 遍</span>
@@ -776,9 +774,9 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>OxygenChallenge</title>
-  <link rel="stylesheet" href="${escapeHtml(apiBase(config))}/widget.css">
+  <link rel="stylesheet" href="${escapeHtml(apiBase(config))}/widget.css?v=${ASSET_VERSION}">
   ${state.type === "turnstile" ? '<script defer src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>' : ""}
-  <script defer src="${escapeHtml(apiBase(config))}/frame.js"></script>
+  <script defer src="${escapeHtml(apiBase(config))}/frame.js?v=${ASSET_VERSION}"></script>
 </head>
 <body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}">
   <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}" data-preview="${state.preview ? "1" : "0"}" data-swap-allowed="${state.swapAllowed ? "1" : "0"}">
@@ -809,7 +807,7 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
           <p>与此 Captcha 交互即代表您同意我们的<a href="${escapeHtml(apiBase(config))}/privacy-policy" target="_blank" rel="noopener noreferrer">隐私政策</a>和<a href="${escapeHtml(apiBase(config))}/user-agreement" target="_blank" rel="noopener noreferrer">用户条款</a></p>
         </div>
         <div class="oc-footer-actions">
-          <button class="oc-text-button" id="oc-accessible" type="button" aria-label="切换到无障碍验证">无障碍验证</button>
+          <button class="oc-text-button" id="oc-accessible" type="button" aria-label="切换到无障碍验证"><span class="oc-sr-only">无障碍验证</span></button>
           <span class="oc-progress">${(state.stepIndex ?? 0) + 1} / ${state.totalSteps ?? 1}</span>
         </div>
       </footer>
@@ -843,8 +841,8 @@ function entryHtml(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>OxygenChallenge</title>
-  <link rel="stylesheet" href="${base}/widget.css">
-  <script defer src="${base}/frame.js"></script>
+  <link rel="stylesheet" href="${base}/widget.css?v=${ASSET_VERSION}">
+  <script defer src="${base}/frame.js?v=${ASSET_VERSION}"></script>
 </head>
 <body class="oc-frame oc-entry-page" data-entry="1" data-challenge-type="entry" data-test-mode="${state.testMode ? "1" : "0"}">
   <main class="oc-shell oc-entry-shell" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(state.parentOrigin ?? "")}" data-accessible="${state.accessible ? "1" : "0"}">
@@ -859,7 +857,7 @@ function entryHtml(
       </div>
       <div class="oc-entry-brand">
         <span>Oxygen Challenge</span>
-        <button class="oc-entry-accessibility" id="oc-entry-accessibility" type="button">无障碍验证</button>
+        <button class="oc-entry-accessibility" id="oc-entry-accessibility" type="button" aria-label="无障碍验证"><span class="oc-sr-only">无障碍验证</span></button>
       </div>
     </section>
   </main>
@@ -909,7 +907,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       verifyTurnstile(secret, token, remoteIp));
   const app = Fastify({
     logger: options.logger === false ? false : { level: process.env.LOG_LEVEL ?? "info" },
-    bodyLimit: 64 * 1024,
+    bodyLimit: 256 * 1024,
     trustProxy: true,
   });
 
@@ -917,7 +915,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     contentSecurityPolicy: {
       directives: {
         "default-src": ["'none'"],
-        "script-src": ["'self'", "https://challenges.cloudflare.com"],
+        "script-src": [
+          "'self'",
+          "'wasm-unsafe-eval'",
+          "https://challenges.cloudflare.com",
+        ],
         "style-src": ["'self'", "'unsafe-inline'"],
         "img-src": ["'self'", "data:", "blob:"],
         "media-src": ["'self'", "blob:"],
@@ -1001,7 +1003,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
 
   app.get("/v1/meta", async () => ({
       name: "OxygenChallenge",
-      version: "v26.0-alpha.5",
+      version: APP_VERSION,
       apiVersion: API_VERSION,
       mode: "api-and-open-platform",
       challengeTypes: CHALLENGE_TYPES,
@@ -1009,6 +1011,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       endpoints: {
         challenge: "/v1/challenges",
         challengeAssets: "/v1/challenges/:id/*",
+        swap: "/v1/challenges/:id/swap",
+        animalSounds: "/v1/animal-sounds/:animal.wav",
         siteverify: "/v1/siteverify",
         embed: "/embed",
         jwks: "/.well-known/oxygenchallenge/jwks.json",
@@ -1055,7 +1059,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       .type("text/html; charset=utf-8")
       .header("Cache-Control", "no-store")
       .header("X-Robots-Tag", "noindex, nofollow")
-      .header("Content-Security-Policy", "default-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
+      .header("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
       .header("Permissions-Policy", "camera=(self), microphone=(self)");
     return reply.send(
       embedHtml(state, config, config.nodeEnv !== "production"),
@@ -1331,6 +1335,30 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     return reply.send(wave);
   });
 
+  app.get("/v1/animal-sounds/:animal.wav", async (request, reply) => {
+    const { animal } = request.params as { animal: string };
+    const animals: AnimalSound[] = [
+      "cat",
+      "dog",
+      "bird",
+      "monkey",
+      "horse",
+      "snake",
+      "bear",
+      "mouse",
+      "elephant",
+      "seal",
+    ];
+    if (!animals.includes(animal as AnimalSound)) {
+      return reply.code(404).send({ error: "ANIMAL_NOT_FOUND" });
+    }
+    const wave = renderAnimalSequenceWave([animal as AnimalSound]);
+    reply
+      .header("Content-Type", "audio/wav")
+      .header("Content-Disposition", "inline");
+    return reply.send(wave);
+  });
+
   app.get("/v1/challenges/:id/target.svg", async (request, reply) => {
     const { id } = request.params as { id: string };
     const state = challenges.getForAsset(id);
@@ -1481,7 +1509,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       .type("text/html; charset=utf-8")
       .header("Cache-Control", "no-store")
       .header("X-Robots-Tag", "noindex, nofollow")
-      .header("Content-Security-Policy", "default-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; frame-ancestors *; base-uri 'none'; form-action 'self'")
+      .header("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; frame-ancestors *; base-uri 'none'; form-action 'self'")
       .header("Permissions-Policy", "camera=(self), microphone=(self)");
     return reply.send(embedHtml(state, config, testMode));
   });

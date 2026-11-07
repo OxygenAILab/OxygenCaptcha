@@ -1,6 +1,6 @@
 # OxygenChallenge API
 
-版本：`26.0.0-alpha.5`
+版本：`26.0.0-alpha.6`
 
 ## 先决条件
 
@@ -148,6 +148,8 @@
 {
   "type": "audio_sequence",
   "audioUrl": "https://captcha.oxygenai.top/v1/challenges/.../sequence.wav",
+  "anchorKey": "dog",
+  "anchorLabel": "狗",
   "options": [
     { "key": "cat", "label": "猫" },
     { "key": "dog", "label": "狗" },
@@ -157,7 +159,9 @@
 }
 ```
 
-声音答案不在 JSON 中返回。
+锚点动物随机选择，声音答案不在 JSON 中返回。选项声音可从
+`GET /v1/animal-sounds/:animal.wav` 单独试听，便于在统一合成音库中建立声音与名称的
+对应，不会泄露序列答案。
 
 ### 计算挑战
 
@@ -301,7 +305,8 @@ Cloudflare `siteverify` 在服务端确认。
 
 中文模板会逐项下发 `李光头`、`宋钢`、`笑`、`哭`、`一声`、`门板` 等
 `focusWindows`。客户端只提交每遍的频段/能量特征；服务端按窗口做 DTW 比较，
-要求三遍存在自然差异且整体保持同一语音内容，拒绝完全相同的波形。
+要求三遍存在自然差异且整体保持同一语音内容，拒绝完全相同的波形。OC 自带嵌入页不会在
+朗读文本中高亮目标词，也不会把 `focusWindows` 写入页面 DOM。
 
 ## 提交答案
 
@@ -466,6 +471,7 @@ alpha.4 客户端继续发送 `{ "market": { "buyIndex": 24, "sellIndex": 84 } }
 | `GET` | `/v1/challenges/:id/target.svg` | 网格目标图 |
 | `GET` | `/v1/challenges/:id/tile/:index.svg` | 0 到 8 的网格项 |
 | `GET` | `/v1/challenges/:id/sequence.wav` | 动物声音序列 |
+| `GET` | `/v1/animal-sounds/:animal.wav` | 单个动物声音试听 |
 | `POST` | `/v1/challenges/:id/swap` | 桌面媒体题换题；`accessible:true` 切换反色听觉替代 |
 
 资源响应均为 `no-store`，Challenge 过期、已消费或题型不匹配时返回 HTTP 410。

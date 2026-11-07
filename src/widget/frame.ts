@@ -1,11 +1,8 @@
 import {
   Accessibility,
-  Bird,
   Camera,
-  Cat,
   Check,
   createElement,
-  Dog,
   Eye,
   Heart,
   Mic,
@@ -116,6 +113,19 @@ const handOverlay = document.querySelector<HTMLCanvasElement>("#oc-hand-overlay"
 const handPlaceholder = document.querySelector<HTMLElement>("#oc-camera-placeholder");
 const handStart = document.querySelector<HTMLButtonElement>("#oc-hand-start");
 const handHelp = document.querySelector<HTMLElement>("#oc-hand-help");
+const handProgress = document.querySelector<HTMLElement>("#oc-hand-progress");
+const handProgressLabel = document.querySelector<HTMLElement>(
+  "#oc-hand-progress-label",
+);
+const handProgressValue = document.querySelector<HTMLOutputElement>(
+  "#oc-hand-progress-value",
+);
+const handProgressTrack = document.querySelector<HTMLElement>(
+  "#oc-hand-progress-track",
+);
+const handProgressFill = document.querySelector<HTMLElement>(
+  "#oc-hand-progress-fill",
+);
 const actionSequence = document.querySelector<HTMLElement>("#oc-action-sequence");
 const speechPhrase = document.querySelector<HTMLElement>("#oc-speech-phrase");
 const speechTakes = document.querySelector<HTMLElement>("#oc-speech-takes");
@@ -255,10 +265,7 @@ function showSuccessState(): void {
         <span class="oc-entry-label">验证通过</span>
         <img class="oc-entry-mark" src="/oxygenmark.png" alt="Oxygen">
       </div>
-      <div class="oc-entry-brand">
-        <span>Oxygen Challenge</span>
-        <a class="oc-entry-accessibility" href="/privacy-policy" target="_blank" rel="noopener noreferrer">隐私与条款</a>
-      </div>
+      <div class="oc-entry-brand is-success"><span>Oxygen Challenge</span></div>
     </section>`;
   lastReportedHeight = 96;
   post("resize", { height: 96, compact: true });
@@ -295,6 +302,7 @@ function initEntry(): void {
   if (body.dataset.entry !== "1" || !entryCheck) {
     return;
   }
+  appendIcon(entryAccessibility, Accessibility);
   entryCheck.addEventListener("click", () => launchChallenge(false));
   entryAccessibility?.addEventListener("click", () => launchChallenge(true));
 }
@@ -387,22 +395,9 @@ function initAudioSequence(): void {
     return;
   }
   appendIcon(playSequenceButton, Play);
-  const choiceIcons = { cat: Cat, dog: Dog, bird: Bird };
 
-  choices?.querySelectorAll<HTMLButtonElement>(".oc-choice").forEach((choice) => {
+  choices?.querySelectorAll<HTMLElement>(".oc-choice").forEach((choice) => {
     const key = choice.dataset.choice;
-    const icon = key === "cat" || key === "dog" || key === "bird" ? choiceIcons[key] : null;
-    const iconSlot = choice.querySelector(".oc-choice-icon");
-    if (icon && iconSlot && !iconSlot.firstElementChild) {
-      iconSlot.append(
-        createElement(icon, {
-          width: 24,
-          height: 24,
-          "stroke-width": 1.8,
-          "aria-hidden": "true",
-        }),
-      );
-    }
     const checkSlot = choice.querySelector(".oc-choice-check");
     if (checkSlot && !checkSlot.firstElementChild) {
       checkSlot.append(
@@ -414,19 +409,42 @@ function initAudioSequence(): void {
         }),
       );
     }
-    choice.addEventListener("click", () => {
+    const selectButton = choice.querySelector<HTMLButtonElement>(".oc-choice-select");
+    const previewButton = choice.querySelector<HTMLButtonElement>(".oc-choice-preview");
+    if (previewButton && !previewButton.firstElementChild) {
+      previewButton.append(
+        createElement(Volume2, {
+          width: 16,
+          height: 16,
+          "stroke-width": 1.8,
+          "aria-hidden": "true",
+        }),
+      );
+    }
+    selectButton?.addEventListener("click", () => {
       const nextChoice = choice.dataset.choice ?? null;
       audioChoice = audioChoice === nextChoice ? null : nextChoice;
-      choices.querySelectorAll<HTMLButtonElement>(".oc-choice").forEach((item) => {
+      choices.querySelectorAll<HTMLElement>(".oc-choice").forEach((item) => {
         const active = item.dataset.choice === audioChoice;
         item.classList.toggle("is-selected", active);
-        item.setAttribute("aria-pressed", String(active));
+        item.querySelector(".oc-choice-select")?.setAttribute("aria-pressed", String(active));
       });
       if (submit) {
         submit.disabled = audioChoice === null;
       }
       setStatus("");
       play("click");
+    });
+    previewButton?.addEventListener("click", () => {
+      if (!player || !key) {
+        return;
+      }
+      play("click");
+      player.src = `/v1/animal-sounds/${encodeURIComponent(key)}.wav`;
+      setStatus("正在播放选项声音…");
+      void player.play().catch(() => {
+        setStatus("无法播放选项声音，请检查设备设置。", "error");
+      });
     });
   });
 
@@ -614,7 +632,116 @@ function initHandMotion(): void {
   let lastVideoTime = -1;
   const observations: Array<{ action: HandMotionAction; durationMs: number }> = [];
 
+  const setProgress = (percent: number, label: string, failed = false) => {
+    const value = Math.max(0, Math.min(100, Math.round(percent)));
+    if (handProgress) {
+      handProgress.hidden = false;
+    }
+    if (handProgressLabel) {
+      handProgressLabel.textContent = label;
+    }
+    if (handProgressValue) {
+      handProgressValue.value = failed ? "失败" : `${value}%`;
+    }
+    if (handProgressFill) {
+      handProgressFill.style.width = `${value}%`;
+      handProgressFill.style.background = failed ? "#b42318" : "";
+    }
+    handProgressTrack?.setAttribute("aria-valuenow", String(value));
+    handProgressTrack?.setAttribute("aria-valuetext", label);
+  };
+
+  const loadModel = async (): Promise<Uint8Array> => {
+    const response = await fetch("/models/hand_landmarker.task", {
+      headers: { Accept: "application/octet-stream" },
+    });
+    if (!response.ok) {
+      throw new Error(`HAND_MODEL_HTTP_${response.status}`);
+    }
+    const total = Number(response.headers.get("content-length") ?? 0);
+    if (!response.body) {
+      setProgress(82, "正在载入手势模型");
+      return new Uint8Array(await response.arrayBuffer());
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        chunks.push(value);
+        received += value.byteLength;
+        const ratio = total > 0 ? received / total : 0.45;
+        setProgress(
+          12 + ratio * 68,
+          total > 0
+            ? `正在下载手势模型 ${Math.min(99, Math.round(ratio * 100))}%`
+            : "正在下载手势模型",
+        );
+      }
+    }
+    const result = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return result;
+  };
+
+  const requestCamera = async (): Promise<MediaStream> => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new DOMException(
+        "Camera APIs are unavailable",
+        "NotSupportedError",
+      );
+    }
+    const pending = navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
+      audio: false,
+    });
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(new DOMException("Camera request timed out", "TimeoutError"));
+      }, 25_000);
+      pending.then(
+        (cameraStream) => {
+          if (settled) {
+            for (const track of cameraStream.getTracks()) {
+              track.stop();
+            }
+            return;
+          }
+          settled = true;
+          window.clearTimeout(timer);
+          resolve(cameraStream);
+        },
+        (error: unknown) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          window.clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+  };
+
   appendIcon(handStart, Camera);
+  const handStartLabel = handStart.querySelector<HTMLElement>("span:last-child");
   const setCurrentAction = () => {
     actionSequence.querySelectorAll<HTMLElement>(".oc-action-chip").forEach((chip, index) => {
       chip.classList.toggle("is-complete", index < currentIndex);
@@ -697,26 +824,20 @@ function initHandMotion(): void {
       return;
     }
     handStart.disabled = true;
-    setStatus("正在请求摄像头…");
+    if (handStartLabel) {
+      handStartLabel.textContent = "手势识别准备中…";
+    }
+    setProgress(3, "加载手势运行环境");
+    setStatus("正在加载手势识别组件…");
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "user",
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-        },
-        audio: false,
-      });
-      handVideo.srcObject = stream;
-      await handVideo.play();
-      if (handPlaceholder) {
-        handPlaceholder.hidden = true;
-      }
       const fileset = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
+      setProgress(12, "下载手势模型");
+      const modelBuffer = await loadModel();
+      setProgress(84, "初始化手势模型");
       try {
         landmarker = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: {
-            modelAssetPath: "/models/hand_landmarker.task",
+            modelAssetBuffer: modelBuffer,
             delegate: "GPU",
           },
           runningMode: "VIDEO",
@@ -726,27 +847,55 @@ function initHandMotion(): void {
           minTrackingConfidence: 0.5,
         });
       } catch {
+        setProgress(88, "切换到兼容模式");
         landmarker = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: {
-            modelAssetPath: "/models/hand_landmarker.task",
+            modelAssetBuffer: modelBuffer,
             delegate: "CPU",
           },
           runningMode: "VIDEO",
           numHands: 1,
         });
       }
+      setProgress(92, "请求摄像头");
+      setStatus("手势识别已就绪，正在请求摄像头…");
+      stream = await requestCamera();
+      setProgress(97, "启动摄像头");
+      handVideo.srcObject = stream;
+      await handVideo.play();
+      if (handPlaceholder) {
+        handPlaceholder.hidden = true;
+      }
+      setProgress(100, "手势识别已就绪");
       running = true;
-      setStatus("请按顺序完成手势。");
+      if (handStartLabel) {
+        handStartLabel.textContent = "手势识别已启用";
+      }
+      setStatus("请按顺序完成手势。", "success");
       requestAnimationFrame(detect);
     } catch (error) {
       stop();
       handStart.disabled = false;
-      setStatus(
-        error instanceof DOMException && error.name === "NotAllowedError"
-          ? "摄像头权限被拒绝，可改用无障碍验证。"
-          : "无法启用摄像头或手势模型。",
-        "error",
-      );
+      const name = error instanceof DOMException ? error.name : "";
+      const message =
+        error instanceof Error && error.message.startsWith("HAND_MODEL_HTTP_")
+          ? "手势模型下载失败，请检查网络后重试。"
+          : name === "NotAllowedError" || name === "SecurityError"
+            ? "摄像头权限被拒绝，可改用无障碍验证。"
+            : name === "NotFoundError" || name === "DevicesNotFoundError"
+              ? "未检测到可用摄像头。"
+              : name === "NotReadableError" || name === "TrackStartError"
+                ? "摄像头可能正被其他应用占用，请关闭占用后重试。"
+                : name === "NotSupportedError"
+                  ? "当前浏览器不支持摄像头访问，请更换浏览器。"
+                : name === "TimeoutError"
+                  ? "摄像头请求超时，请检查浏览器权限后重试。"
+                  : "手势模型加载失败，请重试或改用无障碍验证。";
+      setProgress(100, "手势识别启动失败", true);
+      if (handStartLabel) {
+        handStartLabel.textContent = "重试加载";
+      }
+      setStatus(message, "error");
     }
   });
 
@@ -868,6 +1017,12 @@ function initSpeechWave(): void {
       updateCards();
     }
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new DOMException(
+          "Microphone APIs are unavailable",
+          "NotSupportedError",
+        );
+      }
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -880,7 +1035,16 @@ function initSpeechWave(): void {
         window.AudioContext ??
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
+      if (!Context) {
+        throw new DOMException(
+          "Web Audio is unavailable",
+          "NotSupportedError",
+        );
+      }
       audioContext = new Context();
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 512;
@@ -908,17 +1072,37 @@ function initSpeechWave(): void {
           spectrum.reduce((total, value) => total + value, 0) /
           Math.max(1, spectrum.length) /
           255;
-        frames.push([...bands, energy]);
+        const quantize = (value: number) => Math.round(value * 1_000) / 1_000;
+        frames.push([...bands.map(quantize), quantize(energy)]);
         waveform.push(energy);
         if (waveform.length > 90) {
           waveform = waveform.slice(-90);
         }
         drawSpeechWave(speechWave, waveform);
       }, 50);
-    } catch {
+    } catch (error) {
       recording = false;
+      window.clearInterval(timer);
+      timer = 0;
+      for (const track of stream?.getTracks() ?? []) {
+        track.stop();
+      }
+      stream = null;
+      await audioContext?.close().catch(() => undefined);
+      audioContext = null;
       speechRecord.disabled = false;
-      setStatus("无法访问麦克风，可改用无障碍验证。", "error");
+      const name = error instanceof DOMException ? error.name : "";
+      const message =
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "麦克风权限被拒绝，可改用无障碍验证。"
+          : name === "NotFoundError" || name === "DevicesNotFoundError"
+            ? "未检测到可用麦克风。"
+            : name === "NotReadableError" || name === "TrackStartError"
+              ? "麦克风可能正被其他应用占用，请关闭占用后重试。"
+              : name === "NotSupportedError"
+                ? "当前浏览器不支持录音，请更换浏览器。"
+                : "无法启动麦克风，请重试或改用无障碍验证。";
+      setStatus(message, "error");
     }
   };
 
@@ -1832,7 +2016,8 @@ form?.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const result = (await response.json()) as {
+    const raw = await response.text();
+    let result: {
       verified?: boolean;
       preview?: boolean;
       token?: string;
@@ -1843,11 +2028,33 @@ form?.addEventListener("submit", async (event) => {
       totalSteps?: number;
       nextEmbedUrl?: string;
     };
+    try {
+      result = raw ? (JSON.parse(raw) as typeof result) : {};
+    } catch {
+      result = {};
+    }
+    if (!response.ok) {
+      play("error");
+      const message =
+        response.status === 413
+          ? "提交的数据过大，请缩短录音后重试。"
+          : response.status === 429
+            ? "请求过于频繁，请稍后重试。"
+            : response.status === 410
+              ? "本次验证已过期，请重新开始。"
+              : "验证服务暂时不可用，请稍后重试。";
+      setStatus(message, "error");
+      post("failed", { code: result.code ?? `HTTP_${response.status}` });
+      return;
+    }
 
     if (result.verified && result.preview) {
       verified = true;
       play("success");
-      window.setTimeout(showSuccessState, 220);
+      window.setTimeout(() => {
+        showSuccessState();
+        post("preview-completed", { challengeType: body.dataset.challengeType });
+      }, 180);
       return;
     }
 
@@ -1855,13 +2062,15 @@ form?.addEventListener("submit", async (event) => {
       verified = true;
       play("success");
       setStatus("验证成功。", "success");
-      post("verified", {
-        token: result.token,
-        siteKey: shell.dataset.siteKey,
-        action: shell.dataset.action,
-      });
       submit.disabled = true;
-      window.setTimeout(showSuccessState, 220);
+      window.setTimeout(() => {
+        showSuccessState();
+        post("verified", {
+          token: result.token,
+          siteKey: shell.dataset.siteKey,
+          action: shell.dataset.action,
+        });
+      }, 180);
       return;
     }
 

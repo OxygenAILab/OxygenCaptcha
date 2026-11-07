@@ -127,10 +127,25 @@ export function createMarketTrade(
 ): MarketTradeState {
   const width = 360;
   const height = 156;
-  const prices = marketPrices(seed);
   const profitPct = 5 + (seed % 11);
+  const initialCapital = 1_000;
+  const targetCapital = initialCapital * (1 + profitPct / 100);
+  let chosenSeed = seed;
+  let prices = marketPrices(chosenSeed);
+  if (mode === "target") {
+    for (
+      let attempt = 0;
+      attempt < 24 &&
+      achievableMarketCapital(prices, 0.16, 0.16, initialCapital) <
+        targetCapital;
+      attempt += 1
+    ) {
+      chosenSeed = seed + (attempt + 1) * 104_729;
+      prices = marketPrices(chosenSeed);
+    }
+  }
   return {
-    seed,
+    seed: chosenSeed,
     width,
     height,
     prices,
@@ -141,8 +156,8 @@ export function createMarketTrade(
     sellBandRatio: 0.16,
     ...(mode === "target"
       ? {
-          initialCapital: 1_000,
-          targetCapital: 1_000 + profitPct * 10,
+          initialCapital,
+          targetCapital,
         }
       : {}),
   };
@@ -172,6 +187,33 @@ export function marketCapital(
     }
     return capital * (sell / buy);
   }, initialCapital);
+}
+
+export function achievableMarketCapital(
+  prices: number[],
+  buyBandRatio: number,
+  sellBandRatio: number,
+  initialCapital: number,
+): number {
+  const buyBand = marketBand(prices, buyBandRatio);
+  const sellBand = marketBand(prices, sellBandRatio);
+  const trades: Array<{ buyIndex: number; sellIndex: number }> = [];
+  let previousSell = -1;
+  for (let buyIndex = 0; buyIndex < prices.length; buyIndex += 1) {
+    const buy = prices[buyIndex];
+    if (buyIndex <= previousSell || buy === undefined || buy > buyBand.low) {
+      continue;
+    }
+    for (let sellIndex = buyIndex + 1; sellIndex < prices.length; sellIndex += 1) {
+      const sell = prices[sellIndex];
+      if (sell !== undefined && sell >= sellBand.high) {
+        trades.push({ buyIndex, sellIndex });
+        previousSell = sellIndex;
+        break;
+      }
+    }
+  }
+  return marketCapital(prices, trades, initialCapital);
 }
 
 export function validMarketChoice(

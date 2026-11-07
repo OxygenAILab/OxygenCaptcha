@@ -1,6 +1,6 @@
 # 部署状态
 
-当前版本：`v26.0-alpha.5`
+当前版本：`v26.0-alpha.6`
 
 ## 已完成
 
@@ -15,7 +15,7 @@
   `Host: captcha.oxygenai.top`，均返回健康。
 - 使用 `curl --resolve captcha.oxygenai.top:443:154.219.110.138` 验证了目标域名路由、
   `/embed` 的诱饵文本、SVG overlay 和 `frame.js` 引用。
-- `v26.0-alpha.5` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
+- `v26.0-alpha.6` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
   low/medium/high/critical 风险步数。
 - 官网 `/`、随机挑战 `/captcha`、`/platform` 和 OxygenAccount OAuth 入口均已上线；
   官网顶部横幅会自动识别语言并支持中英文切换。
@@ -56,5 +56,9 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
 - 2026-11-08：`v26.0-alpha.5` 部署完成。新增紧凑入口/成功收起、约 2% 公开预览、
   更长持续覆盖、滚动市场与目标本金、移动设备题型过滤、实用无障碍换题、开放平台
   工作台 UI、官网纯色首屏、双语隐私政策和用户协议；生产环境变量原样保留。
+- 2026-11-08：`v26.0-alpha.6` 部署完成。修复 MediaPipe WASM CSP 导致的摄像头初始化
+  失败，加入模型加载进度与分阶段错误；扩大移动录音证据请求体并量化特征；动物声音
+  随机锚点并增加选项试听；移除朗读目标词高亮；缩小紧凑入口方框、图标化无障碍入口；
+  修复宿主完成事件和官网/开放平台链接样式继承问题。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->

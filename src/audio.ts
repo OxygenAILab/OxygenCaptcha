@@ -82,74 +82,103 @@ function noise(index: number): number {
   return (value - Math.floor(value)) * 2 - 1;
 }
 
+function pulse(seconds: number, start: number, duration: number): number {
+  const progress = (seconds - start) / duration;
+  if (progress < 0 || progress > 1) {
+    return 0;
+  }
+  return Math.sin(Math.PI * progress) ** 1.7;
+}
+
+function voiced(
+  frequency: number,
+  sample: number,
+  brightness = 0.24,
+): number {
+  const phase = (2 * Math.PI * frequency * sample) / SAMPLE_RATE;
+  return (
+    Math.sin(phase) +
+    brightness * Math.sin(phase * 2.02 + 0.3) +
+    brightness * 0.45 * Math.sin(phase * 3.01 + 0.8)
+  );
+}
+
 function animalSample(kind: AnimalSound, sample: number, length: number): number {
   const progress = sample / length;
   const seconds = sample / SAMPLE_RATE;
   const edge = Math.sin(Math.PI * progress);
 
   if (kind === "cat") {
-    const glide = 760 - 360 * progress;
-    const vibrato = 1 + 0.035 * Math.sin(2 * Math.PI * 5.5 * seconds);
-    return (
-      edge ** 1.4 *
-      (0.42 * Math.sin((2 * Math.PI * glide * vibrato * sample) / SAMPLE_RATE) +
-        0.16 * Math.sin((4 * Math.PI * glide * vibrato * sample) / SAMPLE_RATE))
-    );
+    const contour = progress < 0.28
+      ? 620 + progress * 900
+      : 870 - (progress - 0.28) * 720;
+    const vibrato = 1 + 0.06 * Math.sin(2 * Math.PI * 7.2 * seconds) * progress;
+    return edge ** 1.15 * 0.38 * voiced(contour * vibrato, sample, 0.32);
   }
 
   if (kind === "dog") {
-    const pulse = Math.max(0, Math.sin(2 * Math.PI * 3.6 * seconds));
-    return (
-      Math.pow(edge, 0.45) *
-      (0.32 * Math.sin((2 * Math.PI * (185 - 35 * progress) * sample) / SAMPLE_RATE) +
-        0.22 * pulse * noise(sample))
-    );
+    const first = pulse(seconds, 0.02, 0.23);
+    const second = pulse(seconds, 0.34, 0.27);
+    const bark = first + second * 0.92;
+    const frequency = seconds < 0.3 ? 190 : 165;
+    return bark * (0.3 * voiced(frequency, sample, 0.4) + 0.2 * noise(sample));
   }
 
   if (kind === "bird") {
-    const chirpPhase = (seconds * 4.5) % 1;
-    const chirpEnvelope = Math.sin(Math.PI * Math.min(1, chirpPhase * 1.8));
-    const frequency = 1_180 + 1_250 * Math.sin(Math.PI * progress) ** 2;
-    return (
-      edge *
-      chirpEnvelope *
-      (0.32 * Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE) +
-        0.12 * Math.sin((4 * Math.PI * frequency * sample) / SAMPLE_RATE))
-    );
+    const chirp =
+      pulse(seconds, 0.01, 0.08) +
+      pulse(seconds, 0.13, 0.09) +
+      pulse(seconds, 0.28, 0.11);
+    const frequency = 1_650 + 1_950 * Math.max(0, Math.sin(Math.PI * progress));
+    return chirp * 0.26 * Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE);
   }
 
   if (kind === "monkey") {
-    const chirp = Math.max(0, Math.sin(2 * Math.PI * 7 * seconds));
-    const frequency = 940 + 520 * Math.sin(Math.PI * progress);
-    return edge * chirp * (0.34 * Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE) + 0.12 * noise(sample));
+    const hoot =
+      pulse(seconds, 0.01, 0.12) +
+      pulse(seconds, 0.17, 0.11) +
+      pulse(seconds, 0.32, 0.15);
+    const frequency = 430 + 560 * progress;
+    return hoot * (0.3 * voiced(frequency, sample, 0.28) + 0.04 * noise(sample));
   }
 
   if (kind === "horse") {
-    const pulse = Math.max(0, Math.sin(2 * Math.PI * 2.2 * seconds));
-    return Math.pow(edge, 0.6) * pulse * (0.36 * Math.sin((2 * Math.PI * (150 - 45 * progress) * sample) / SAMPLE_RATE) + 0.1 * noise(sample));
+    const flutter = 1 + 0.11 * Math.sin(2 * Math.PI * 17 * seconds);
+    const frequency = (760 - 520 * progress) * flutter;
+    return edge ** 0.75 * 0.32 * (voiced(frequency, sample, 0.37) + 0.08 * noise(sample));
   }
 
   if (kind === "snake") {
-    return edge * (0.24 * noise(sample) + 0.08 * Math.sin((2 * Math.PI * (2_200 + 700 * Math.sin(Math.PI * progress)) * sample) / SAMPLE_RATE));
+    const air = 0.7 + 0.3 * Math.sin(2 * Math.PI * 3.7 * seconds);
+    return edge * air * (0.31 * noise(sample) + 0.035 * voiced(3_100, sample, 0.04));
   }
 
   if (kind === "bear") {
-    const growl = 0.45 + 0.55 * Math.sin(2 * Math.PI * 1.4 * seconds);
-    return Math.pow(edge, 0.45) * growl * (0.34 * Math.sin((2 * Math.PI * (92 - 18 * progress) * sample) / SAMPLE_RATE) + 0.12 * noise(sample));
+    const rumble = 0.72 + 0.28 * Math.sin(2 * Math.PI * 2.3 * seconds);
+    return edge ** 0.55 * rumble * (0.38 * voiced(78 - 8 * progress, sample, 0.42) + 0.15 * noise(sample));
   }
 
   if (kind === "mouse") {
-    const squeak = Math.max(0, Math.sin(2 * Math.PI * 9 * seconds));
-    return edge * squeak * 0.24 * Math.sin((2 * Math.PI * (1_900 + 1_100 * Math.sin(Math.PI * progress)) * sample) / SAMPLE_RATE);
+    const squeak =
+      pulse(seconds, 0.01, 0.1) +
+      pulse(seconds, 0.16, 0.09);
+    const frequency = 2_300 + 1_250 * Math.sin(Math.PI * progress);
+    return squeak * 0.2 * Math.sin((2 * Math.PI * frequency * sample) / SAMPLE_RATE);
   }
 
   if (kind === "elephant") {
-    const trumpet = Math.max(0, Math.sin(2 * Math.PI * 1.2 * seconds));
-    return Math.pow(edge, 0.5) * trumpet * (0.4 * Math.sin((2 * Math.PI * (240 + 180 * Math.sin(Math.PI * progress)) * sample) / SAMPLE_RATE) + 0.08 * noise(sample));
+    const blast = pulse(seconds, 0.01, 0.5);
+    const frequency = progress < 0.58
+      ? 250 + 620 * progress
+      : 610 - 300 * (progress - 0.58);
+    return blast * (0.36 * voiced(frequency, sample, 0.48) + 0.07 * noise(sample));
   }
 
-  const bark = Math.max(0, Math.sin(2 * Math.PI * 4.2 * seconds));
-  return Math.pow(edge, 0.55) * bark * (0.35 * Math.sin((2 * Math.PI * (310 - 70 * progress) * sample) / SAMPLE_RATE) + 0.16 * noise(sample));
+  const seal =
+    pulse(seconds, 0.01, 0.12) +
+    pulse(seconds, 0.15, 0.12) +
+    pulse(seconds, 0.3, 0.13);
+  return seal * (0.26 * voiced(360 - 150 * progress, sample, 0.32) + 0.16 * noise(sample));
 }
 
 export function renderAnimalSequenceWave(animals: readonly AnimalSound[]): Buffer {

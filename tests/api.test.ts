@@ -89,6 +89,7 @@ describe("OxygenChallenge API", () => {
       expression?: string;
       requiredDistance?: number;
       requiredHoldMs?: number;
+      prompt?: string;
       sessionId?: string;
       step?: number;
       totalSteps?: number;
@@ -348,6 +349,19 @@ describe("OxygenChallenge API", () => {
     expect(visibleSixDigit).toContain(state?.decoyCode);
   });
 
+  it("allows WebAssembly for the hand model and renders load progress", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/embed?sitekey=site_test&action=submit&parentOrigin=https%3A%2F%2Fapp.test&challengeType=hand_motion&test=1&launch=1",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-security-policy"]).toContain(
+      "'wasm-unsafe-eval'",
+    );
+    expect(response.body).toContain('id="oc-hand-progress"');
+    expect(response.body).toContain('role="progressbar"');
+  });
+
   it("serves a WAV accessibility fallback", async () => {
     const body = await create("inverse_occlusion");
     const response = await app.inject({
@@ -437,7 +451,9 @@ describe("OxygenChallenge API", () => {
     expect(body.options).toHaveLength(4);
     expect(body.audioUrl).toContain("/sequence.wav");
     expect(body).not.toHaveProperty("answerKey");
-    expect(state?.audioSequence?.animals).toContain("cat");
+    expect(state?.audioSequence?.animals).toContain(
+      state?.audioSequence?.anchorKey,
+    );
 
     const audio = await app.inject({
       method: "GET",
@@ -447,6 +463,14 @@ describe("OxygenChallenge API", () => {
     expect(audio.headers["content-type"]).toContain("audio/wav");
     expect(audio.rawPayload.subarray(0, 4).toString()).toBe("RIFF");
 
+    const preview = await app.inject({
+      method: "GET",
+      url: "/v1/animal-sounds/dog.wav",
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.headers["content-type"]).toContain("audio/wav");
+    expect(preview.rawPayload.subarray(0, 4).toString()).toBe("RIFF");
+
     const answer = state?.audioSequence?.answerKey;
     const correct = await app.inject({
       method: "POST",
@@ -455,6 +479,47 @@ describe("OxygenChallenge API", () => {
     });
     expect(correct.statusCode).toBe(200);
     expect(correct.json()).toMatchObject({ verified: true, siteKey: "site_test" });
+  });
+
+  it("randomizes the animal anchor instead of always using a cat", async () => {
+    const anchors = new Set<string>();
+    for (let index = 0; index < 24; index += 1) {
+      const body = await create("audio_sequence");
+      const state = challenges.getForAsset(body.challengeId);
+      expect(state?.audioSequence?.anchorKey).toBeTruthy();
+      anchors.add(state?.audioSequence?.anchorKey ?? "");
+      expect(body.prompt).toContain(state?.audioSequence?.anchorLabel ?? "");
+    }
+    expect([...anchors].some((anchor) => anchor !== "cat")).toBe(true);
+  });
+
+  it("does not reveal speech target words in the challenge page and accepts larger quantized feature payloads", async () => {
+    const body = await create("speech_wave");
+    const state = challenges.getForAsset(body.challengeId);
+    const embed = await app.inject({
+      method: "GET",
+      url: "/embed?sitekey=site_test&action=submit&parentOrigin=https%3A%2F%2Fapp.test&challengeType=speech_wave&test=1&launch=1",
+    });
+    expect(embed.statusCode).toBe(200);
+    expect(embed.body).not.toContain("<mark");
+    expect(embed.body).not.toContain("data-focus-start");
+    expect(embed.body).toContain('class="oc-speech-phrase"');
+    expect(embed.body).not.toContain("targetWords");
+
+    const frames = Array.from({ length: 160 }, () =>
+      Array.from({ length: 8 }, () => 0.12345678901234567),
+    );
+    const payload = { audioTakes: [frames, frames, frames] };
+    const payloadBytes = Buffer.byteLength(JSON.stringify(payload));
+    expect(payloadBytes).toBeGreaterThan(64 * 1024);
+    expect(payloadBytes).toBeLessThan(256 * 1024);
+    const verification = await app.inject({
+      method: "POST",
+      url: `/v1/challenges/${body.challengeId}/verify`,
+      payload,
+    });
+    expect(verification.statusCode).toBe(200);
+    expect(verification.json()).toMatchObject({ verified: false });
   });
 
   it("keeps the calculation answer server-side and verifies an integer result", async () => {
@@ -574,13 +639,14 @@ describe("OxygenChallenge API", () => {
     if (!state?.marketTrade) {
       throw new Error("market state missing");
     }
-    const trade = bestMarketTrade(state.marketTrade.prices);
+    const trades =
+      state.marketTrade.mode === "target"
+        ? targetMarketTrades(state.marketTrade)
+        : [bestMarketTrade(state.marketTrade.prices)];
     const response = await app.inject({
       method: "POST",
       url: `/v1/challenges/${body.challengeId}/verify`,
-      payload: {
-        marketTrades: [trade],
-      },
+      payload: { marketTrades: trades },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ verified: true, siteKey: "site_test" });
@@ -604,14 +670,15 @@ describe("OxygenChallenge API", () => {
     ).toBe(false);
   });
 
-  it("issues a token only after all medium-risk session steps pass", async () => {
+  it("issues a token only after all risk-upgraded session steps pass", async () => {
     const first = await createSession("medium");
-    expect(first.totalSteps).toBe(4);
+    expect(first.totalSteps).toBe(RISK_STEPS[first.risk]);
+    expect(first.totalSteps).toBeGreaterThanOrEqual(4);
     expect(first.step).toBe(1);
-    expect(first.risk).toBe("medium");
+    expect(["medium", "high", "critical"]).toContain(first.risk);
 
     let challengeId = first.challengeId;
-    for (let step = 1; step <= 4; step += 1) {
+    for (let step = 1; step <= first.totalSteps; step += 1) {
       const state = challenges.getForAsset(challengeId);
       expect(state).toBeDefined();
       if (!state) {
@@ -630,15 +697,18 @@ describe("OxygenChallenge API", () => {
         nextChallenge?: { challengeId: string };
         stepsCompleted?: number;
       }>();
-      if (step < 4) {
+      if (step < first.totalSteps) {
         expect(result.verified).toBe(false);
-        expect(result.stepPassed).toBe(true);
+        expect(
+          result.stepPassed,
+          `step ${step} ${state.type} ${JSON.stringify(result)}`,
+        ).toBe(true);
         expect(result).not.toHaveProperty("token");
         expect(result.nextChallenge?.challengeId).toBeTruthy();
         challengeId = result.nextChallenge?.challengeId ?? "";
       } else {
         expect(result.verified).toBe(true);
-        expect(result.stepsCompleted).toBe(4);
+        expect(result.stepsCompleted).toBe(first.totalSteps);
         expect(result.token).toContain(".");
       }
     }

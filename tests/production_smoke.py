@@ -138,7 +138,8 @@ with sync_playwright() as playwright:
     speech, speech_errors = open_page(browser, {"width": 900, "height": 820})
     speech.goto(embed_url("speech_wave"), wait_until="networkidle")
     assert speech.locator(".oc-speech-take").count() == 3
-    assert speech.locator("#oc-speech-phrase mark").count() >= 1
+    assert speech.locator("#oc-speech-phrase mark").count() == 0
+    assert speech.locator("#oc-speech-phrase").inner_text().strip()
     assert speech.locator("#oc-speech-record").is_visible()
     speech.screenshot(path=str(OUT / "production-speech.png"), full_page=True)
     assert not speech_errors, speech_errors

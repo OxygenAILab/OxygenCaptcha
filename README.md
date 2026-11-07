@@ -1,6 +1,6 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.5` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.6` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
 一次性验证令牌、风险会话和十五类交互挑战：
 
@@ -67,6 +67,8 @@ python tests/browser_smoke.py
 成功后会向最近的 `form` 插入名为 `oxygen-token` 的隐藏字段，并触发
 `oxygenchallenge:verified` 事件。可通过 `challenge-type` 固定题型，通过
 `risk` 控制会话步数，通过 `accessible="true"` 强制单步反色无障碍模式。
+`oxygenchallenge:complete` 会与 `verified` 同步触发；完成态和宿主的验证回调在同一收起
+流程中处理。
 没有固定宽度时默认 400px，也可用 `width="360"` 等属性定制宽度；高度保持固定，
 挑战展开层不会改变宿主文档流。
 
@@ -125,6 +127,8 @@ python tests/browser_smoke.py
 - 网格索引、序列、声音答案、计数结果、市场极值和计算结果只保存在服务端。
 - 公开预览不签发 token，也不携带风险会话 ID；风险题仍按 UA、设备类、网络和请求频次升级。
 - 无障碍按钮会实际切换到带 DTMF 音频的反色题，而不是无效刷新。
+- 摄像头题先加载手势模型并显示进度，再请求摄像头；CSP 明确允许受限 WASM 实例化。
+- 动物声音使用随机锚点动物，选项支持单声试听；语音题不再在文本中高亮检测词。
 - `siteverify` 令牌使用 Ed25519 签名，默认 120 秒有效并原子消费。
 - 风险会话只在最后一步签发令牌，并绑定单个 session/action/site。
 - CORS、Origin/Referer 白名单、CSP、`no-store`、限速和结构化风险日志默认开启。

@@ -209,13 +209,16 @@ function createAudioSequence(preview = false): AudioSequenceState {
   while (animals.length < 4) {
     animals.push(available[randomInt(0, available.length)]?.key ?? "bird");
   }
-  const catIndex = randomInt(0, 3);
-  const answerPool = available.filter((animal) => animal.key !== "cat");
+  const anchor =
+    available[randomInt(0, available.length)] ??
+    { key: "bird", label: "鸟" };
+  const answerPool = available.filter((animal) => animal.key !== anchor.key);
   const answerKey =
     answerPool[randomInt(0, answerPool.length)]?.key ?? "dog";
-  animals[catIndex] = "cat";
-  animals[catIndex + 1] = answerKey;
-  const optionKeys = new Set<AnimalSound>(["cat", answerKey]);
+  const anchorIndex = randomInt(0, 3);
+  animals[anchorIndex] = anchor.key;
+  animals[anchorIndex + 1] = answerKey;
+  const optionKeys = new Set<AnimalSound>([anchor.key, answerKey]);
   for (const animal of shuffle([...available])) {
     if (optionKeys.size >= Math.min(4, available.length)) {
       break;
@@ -226,6 +229,8 @@ function createAudioSequence(preview = false): AudioSequenceState {
   return {
     animals,
     answerKey,
+    anchorKey: anchor.key,
+    anchorLabel: anchor.label,
     options: shuffle(
       available.filter((animal) => optionKeys.has(animal.key)),
     ),

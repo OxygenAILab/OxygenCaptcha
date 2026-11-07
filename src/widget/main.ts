@@ -120,6 +120,7 @@ class OxygenChallengeElement extends HTMLElement {
       code?: string;
       height?: number;
       compact?: boolean;
+      challengeType?: string;
       step?: number;
       totalSteps?: number;
     };
@@ -151,6 +152,19 @@ class OxygenChallengeElement extends HTMLElement {
       this.attachHiddenToken(data.token);
       this.dispatchEvent(
         new CustomEvent("oxygenchallenge:verified", { detail: { token: data.token }, bubbles: true }),
+      );
+      this.dispatchEvent(
+        new CustomEvent("oxygenchallenge:complete", {
+          detail: { token: data.token },
+          bubbles: true,
+        }),
+      );
+    } else if (data.type === "preview-completed") {
+      this.dispatchEvent(
+        new CustomEvent("oxygenchallenge:preview-completed", {
+          detail: { challengeType: data.challengeType },
+          bubbles: true,
+        }),
       );
     } else if (data.type === "failed" || data.type === "error") {
       this.dispatchEvent(

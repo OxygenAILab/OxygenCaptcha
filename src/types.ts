@@ -84,6 +84,18 @@ export type AudioSequenceState = {
     | "mouse"
     | "elephant"
     | "seal";
+  anchorKey:
+    | "cat"
+    | "dog"
+    | "bird"
+    | "monkey"
+    | "horse"
+    | "snake"
+    | "bear"
+    | "mouse"
+    | "elephant"
+    | "seal";
+  anchorLabel: string;
   options: Array<{
     key:
       | "cat"

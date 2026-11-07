@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.0-alpha.5
+  version: 26.0.0-alpha.6
   description: Risk-aware CAPTCHA API with visual, motion, audio, calculation, camera, speech and Cloudflare Turnstile challenges.
   license:
     name: Apache-2.0
@@ -186,6 +186,27 @@ paths:
                 format: binary
         "410":
           description: Challenge expired or wrong type
+  /v1/animal-sounds/{animal}.wav:
+    get:
+      operationId: getAnimalSoundPreview
+      summary: Get one synthesized animal sound for option audition
+      parameters:
+        - in: path
+          name: animal
+          required: true
+          schema:
+            type: string
+            enum: [cat, dog, bird, monkey, horse, snake, bear, mouse, elephant, seal]
+      responses:
+        "200":
+          description: WAV clip
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Unknown animal
   /v1/siteverify:
     post:
       operationId: siteverify
@@ -428,6 +449,11 @@ components:
                 enum: [cat, dog, bird, monkey, horse, snake, bear, mouse, elephant, seal]
               label:
                 type: string
+        anchorKey:
+          type: string
+          enum: [cat, dog, bird, monkey, horse, snake, bear, mouse, elephant, seal]
+        anchorLabel:
+          type: string
         expression:
           type: string
         requiredDistance:

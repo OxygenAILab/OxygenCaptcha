@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import math
+import struct
 import time
+import wave
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -13,6 +15,30 @@ HOST_BASE = os.environ.get("OXY_TEST_HOST_BASE", "http://127.0.0.1:8792").rstrip
 SITE_KEY = os.environ.get("OXY_TEST_SITE_KEY", "oc_dev_public")
 OUT = Path("_devdocs/evidence")
 OUT.mkdir(parents=True, exist_ok=True)
+
+
+def fake_speech_audio() -> Path:
+    path = OUT / "fake-speech.wav"
+    if path.exists():
+        return path
+    sample_rate = 48_000
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(sample_rate)
+        frames = bytearray()
+        for index in range(sample_rate * 6):
+            seconds = index / sample_rate
+            syllable = max(0.0, math.sin(2 * math.pi * 2.7 * seconds))
+            carrier = (
+                0.42 * math.sin(2 * math.pi * 180 * seconds)
+                + 0.24 * math.sin(2 * math.pi * 360 * seconds)
+                + 0.12 * math.sin(2 * math.pi * 720 * seconds)
+            )
+            value = int(12_000 * syllable * carrier)
+            frames.extend(struct.pack("<h", value))
+        output.writeframes(frames)
+    return path
 
 
 def embed_url(
@@ -42,8 +68,13 @@ def open_page(
     browser: Browser,
     viewport: dict[str, int],
     reduced_motion: str = "reduce",
+    permissions: list[str] | None = None,
 ) -> tuple[Page, list[str]]:
-    context = browser.new_context(viewport=viewport, reduced_motion=reduced_motion)
+    context = browser.new_context(
+        viewport=viewport,
+        reduced_motion=reduced_motion,
+        permissions=permissions or [],
+    )
     page = context.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -155,6 +186,10 @@ def canvas_target(page: Page) -> tuple[float, float]:
 
 
 def solve_motion(page: Page, submit: bool = True) -> None:
+    page.wait_for_function(
+        "() => Number.isFinite(Number(document.querySelector('#oc-motion-canvas')?.dataset.targetX))",
+        timeout=5_000,
+    )
     x, y = canvas_target(page)
     page.mouse.move(x, y)
     page.mouse.down()
@@ -420,7 +455,8 @@ def screenshot_type(browser: Browser, challenge_type: str, viewport_name: str, v
         assert page.locator("#oc-hand-start").is_visible()
     if challenge_type == "speech_wave":
         assert page.locator(".oc-speech-take").count() == 3
-        assert page.locator("#oc-speech-phrase mark").count() >= 1
+        assert page.locator("#oc-speech-phrase mark").count() == 0
+        assert page.locator("#oc-speech-phrase").inner_text().strip()
     page.screenshot(path=str(OUT / f"{viewport_name}-{challenge_type}.png"), full_page=True)
     assert not errors, errors
 
@@ -512,8 +548,11 @@ def run_audio_checks(browser: Browser) -> None:
     page.locator("#oc-play-sequence").click()
     audio_src = page.locator("#oc-player").get_attribute("src")
     assert audio_src and audio_src.endswith("/sequence.wav"), audio_src
+    page.locator(".oc-choice-preview").first.click()
+    preview_src = page.locator("#oc-player").get_attribute("src")
+    assert preview_src and "/v1/animal-sounds/" in preview_src, preview_src
     answer = state["audioSequence"]["answerKey"]
-    page.locator(f'.oc-choice[data-choice="{answer}"]').click()
+    page.locator(f'.oc-choice[data-choice="{answer}"] .oc-choice-select').click()
     assert "is-selected" in page.locator(f'.oc-choice[data-choice="{answer}"]').get_attribute("class")
     page.locator("#oc-submit").click()
     wait_for_status(page, "验证成功")
@@ -593,6 +632,68 @@ def run_basic_checks(browser: Browser) -> None:
 
 
 def run_media_checks(browser: Browser) -> None:
+    camera, camera_errors = open_page(
+        browser,
+        {"width": 900, "height": 820},
+        reduced_motion="no-preference",
+        permissions=["camera"],
+    )
+    camera.goto(embed_url("hand_motion"), wait_until="networkidle")
+    camera.locator("#oc-hand-start").click()
+    camera.wait_for_function(
+        "() => document.querySelector('#oc-status')?.textContent.includes('请按顺序完成手势')",
+        timeout=60_000,
+    )
+    camera_runtime = camera.evaluate(
+        """() => ({
+          progress: document.querySelector('#oc-hand-progress-value')?.value,
+          hasStream: Boolean(document.querySelector('#oc-hand-video')?.srcObject),
+          videoReady: document.querySelector('#oc-hand-video')?.readyState
+        })"""
+    )
+    assert camera_runtime["progress"] == "100%", camera_runtime
+    assert camera_runtime["hasStream"], camera_runtime
+    assert camera_runtime["videoReady"] >= 2, camera_runtime
+    camera.screenshot(path=str(OUT / "desktop-hand-model-ready.png"), full_page=True)
+    assert not camera_errors, camera_errors
+
+    mobile_speech, mobile_speech_errors = open_page(
+        browser,
+        {"width": 390, "height": 844},
+        reduced_motion="no-preference",
+        permissions=["microphone"],
+    )
+    mobile_payloads: list[int] = []
+    mobile_responses: list[int] = []
+    mobile_speech.on(
+        "request",
+        lambda request: mobile_payloads.append(len(request.post_data or ""))
+        if request.url.endswith("/verify")
+        else None,
+    )
+    mobile_speech.on(
+        "response",
+        lambda response: mobile_responses.append(response.status)
+        if response.url.endswith("/verify")
+        else None,
+    )
+    mobile_speech.goto(embed_url("speech_wave"), wait_until="networkidle")
+    for _ in range(3):
+        mobile_speech.locator("#oc-speech-record").click()
+        mobile_speech.wait_for_timeout(2200)
+        mobile_speech.locator("#oc-speech-record").click()
+        mobile_speech.wait_for_timeout(420)
+    assert mobile_speech.locator("#oc-submit").is_enabled()
+    mobile_speech.locator("#oc-submit").click()
+    mobile_speech.wait_for_timeout(4_000)
+    assert mobile_payloads and mobile_payloads[-1] < 256 * 1024, mobile_payloads
+    assert mobile_responses and mobile_responses[-1] == 200, mobile_responses
+    mobile_speech.screenshot(
+        path=str(OUT / "mobile-speech-submitted.png"),
+        full_page=True,
+    )
+    assert not mobile_speech_errors, mobile_speech_errors
+
     hand, hand_errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
     hand.goto(embed_url("hand_motion"), wait_until="networkidle")
     hand_state = challenge_state(hand)
@@ -616,10 +717,8 @@ def run_media_checks(browser: Browser) -> None:
     speech, speech_errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
     speech.goto(embed_url("speech_wave"), wait_until="networkidle")
     speech_state = challenge_state(speech)
-    marks = speech.locator("#oc-speech-phrase mark").all_inner_texts()
-    target_words = speech_state["speechWave"]["targetWords"]
-    assert set(marks) == set(target_words), (marks, speech_state["speechWave"])
-    assert all(mark in marks for mark in target_words)
+    assert speech.locator("#oc-speech-phrase mark").count() == 0
+    assert speech.locator("#oc-speech-phrase").inner_text() == speech_state["speechWave"]["phrase"]
     solve_speech(speech, speech_state, submit=False)
     speech.locator("#oc-submit").click()
     wait_for_status(speech, "验证成功")
@@ -653,6 +752,10 @@ def run_site_checks(browser: Browser) -> None:
         assert ("Verify behavior" in switched) if target == "en" else ("验证行为" in switched)
         assert page.locator(".hero-media").count() == 0
         assert page.locator(".hero-signal").is_visible()
+        brand_style = page.locator(".site-nav .brand").evaluate(
+            "(element) => ({ decoration: getComputedStyle(element).textDecorationLine, color: getComputedStyle(element).color })"
+        )
+        assert brand_style["decoration"] == "none", brand_style
         assert_no_horizontal_overflow(page)
         page.screenshot(path=str(OUT / f"{viewport_name}-official-site.png"), full_page=True)
         assert not errors, errors
@@ -660,6 +763,10 @@ def run_site_checks(browser: Browser) -> None:
     captcha, captcha_errors = open_page(browser, {"width": 900, "height": 820}, reduced_motion="no-preference")
     captcha.goto(f"{BASE}/captcha", wait_until="networkidle")
     captcha.locator("#oc-entry-check").wait_for()
+    check_box = captcha.locator(".oc-entry-check-box").bounding_box()
+    assert check_box
+    assert 27 <= check_box["width"] <= 31, check_box
+    assert 27 <= check_box["height"] <= 31, check_box
     captcha.screenshot(path=str(OUT / "desktop-captcha-entry.png"), full_page=True)
     captcha.locator("#oc-entry-check").click()
     captcha.locator(".oc-card").wait_for(timeout=10_000)
@@ -671,6 +778,10 @@ def run_site_checks(browser: Browser) -> None:
     platform, platform_errors = open_page(browser, {"width": 900, "height": 760})
     platform.goto(f"{BASE}/platform", wait_until="networkidle")
     assert platform.locator(".panel").is_visible()
+    platform_brand_style = platform.locator(".topbar .brand").evaluate(
+        "(element) => ({ decoration: getComputedStyle(element).textDecorationLine, color: getComputedStyle(element).color })"
+    )
+    assert platform_brand_style["decoration"] == "none", platform_brand_style
     platform.screenshot(path=str(OUT / "desktop-platform.png"), full_page=True)
     assert not platform_errors, platform_errors
 
@@ -701,7 +812,7 @@ def solve_current(page: Page, state: dict, submit: bool = True) -> None:
         solve_motion(page, submit=False)
     elif challenge_type == "audio_sequence":
         answer = state["audioSequence"]["answerKey"]
-        page.locator(f'.oc-choice[data-choice="{answer}"]').click()
+        page.locator(f'.oc-choice[data-choice="{answer}"] .oc-choice-select').click()
     elif challenge_type == "calculation":
         page.locator("#oc-answer").fill(state["calculation"]["answer"])
     elif challenge_type == "key_pointer":
@@ -790,6 +901,20 @@ button{{min-height:44px;margin-top:12px}}
     host.goto(f"{HOST_BASE}/", wait_until="networkidle")
     widget = host.locator("oxygen-challenge")
     widget.wait_for()
+    host.evaluate(
+        """() => {
+          window.__ocVerifiedEvents = [];
+          window.__ocCompleteEvents = [];
+          document.querySelector('oxygen-challenge').addEventListener(
+            'oxygenchallenge:verified',
+            (event) => window.__ocVerifiedEvents.push(event.detail),
+          );
+          document.querySelector('oxygen-challenge').addEventListener(
+            'oxygenchallenge:complete',
+            (event) => window.__ocCompleteEvents.push(event.detail),
+          );
+        }"""
+    )
     iframe_src = widget.evaluate("(el) => el.shadowRoot.querySelector('iframe').src")
     assert "challengeType=inverse_occlusion" in iframe_src, iframe_src
     assert "parentOrigin=http%3A%2F%2F127.0.0.1%3A8792" in iframe_src, iframe_src
@@ -831,6 +956,9 @@ button{{min-height:44px;margin-top:12px}}
         "(el) => el.querySelector('input[name=\"oxygen-token\"]')?.value"
     )
     assert token and token.count(".") == 2, token
+    assert host.evaluate("window.__ocVerifiedEvents.length") == 1
+    assert host.evaluate("window.__ocCompleteEvents.length") == 1
+    assert frame.locator(".oc-entry-label").inner_text() == "验证通过"
     host.wait_for_function(
         """() => {
           const iframe = document.querySelector('oxygen-challenge')
@@ -858,6 +986,8 @@ with sync_playwright() as playwright:
         launch_options["args"] = [
             "--disable-web-security",
             "--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights",
+            "--use-fake-device-for-media-stream",
+            f"--use-file-for-fake-audio-capture={fake_speech_audio()}",
         ]
     browser = playwright.chromium.launch(**launch_options)
     viewports = {
