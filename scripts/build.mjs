@@ -74,3 +74,4 @@ await cp(
   { recursive: true },
 );
 await cp(resolve(root, "public"), publicDir, { recursive: true });
+await cp(resolve(root, "openapi.yaml"), resolve(publicDir, "openapi.yaml"));

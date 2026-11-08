@@ -1,6 +1,6 @@
 # 部署状态
 
-当前版本：`v26.0-alpha.6`
+当前版本：`v26.0-alpha.7`
 
 ## 已完成
 
@@ -15,7 +15,7 @@
   `Host: captcha.oxygenai.top`，均返回健康。
 - 使用 `curl --resolve captcha.oxygenai.top:443:154.219.110.138` 验证了目标域名路由、
   `/embed` 的诱饵文本、SVG overlay 和 `frame.js` 引用。
-- `v26.0-alpha.6` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
+- `v26.0-alpha.7` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
   low/medium/high/critical 风险步数。
 - 官网 `/`、随机挑战 `/captcha`、`/platform` 和 OxygenAccount OAuth 入口均已上线；
   官网顶部横幅会自动识别语言并支持中英文切换。
@@ -60,5 +60,10 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
   失败，加入模型加载进度与分阶段错误；扩大移动录音证据请求体并量化特征；动物声音
   随机锚点并增加选项试听；移除朗读目标词高亮；缩小紧凑入口方框、图标化无障碍入口；
   修复宿主完成事件和官网/开放平台链接样式继承问题。
+- 2026-11-08：`v26.0-alpha.7` 部署完成。加强展开/收起动效；开放平台新增最长 179 分钟的
+  开发 IP 免验证规则与自动验证流程；补齐 `/docs`、`/docs/embed`、`/docs/integration`、
+  `/docs/platform` 在线文档和 `/openapi.yaml` 静态描述。生产 Playwright smoke、桌面/移动
+  官网、随机挑战、基础验证、Turnstile、摄像头权限路径、OAuth 入口和法律页面均通过；
+  `/v1/meta`、官网资源查询串与 `/openapi.yaml` 均确认指向 `26.0.0-alpha.7`。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->

@@ -313,7 +313,7 @@ describe("alpha.6 risk helpers", () => {
   });
 });
 
-describe("alpha.6 Turnstile and platform persistence", () => {
+describe("alpha.7 Turnstile, platform persistence, docs, and IP bypass", () => {
   it("advertises API version 1 and rejects incompatible callers", async () => {
     const built = await buildApp({
       config: makeConfig(),
@@ -324,7 +324,7 @@ describe("alpha.6 Turnstile and platform persistence", () => {
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.6" });
+      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.7" });
 
       const mismatch = await built.app.inject({
         method: "POST",
@@ -517,6 +517,170 @@ describe("alpha.6 Turnstile and platform persistence", () => {
         active: true,
       });
       expect(created.json<{ secret: string }>().secret).toMatch(/^oc_sec_/);
+
+      const appId = created.json<{ id: string }>().id;
+      const bypass = await built.app.inject({
+        method: "POST",
+        url: `/api/platform/apps/${appId}/bypass`,
+        headers: {
+          cookie: cookie ?? "",
+          "x-csrf-token": sessionBody.csrf,
+        },
+        payload: {
+          ip: "203.0.113.10",
+          durationMinutes: 179,
+        },
+      });
+      expect(bypass.statusCode).toBe(200);
+      expect(bypass.json()).toMatchObject({
+        ipBypasses: [{ ip: "203.0.113.10" }],
+      });
+
+      const tooLong = await built.app.inject({
+        method: "POST",
+        url: `/api/platform/apps/${appId}/bypass`,
+        headers: {
+          cookie: cookie ?? "",
+          "x-csrf-token": sessionBody.csrf,
+        },
+        payload: {
+          ip: "203.0.113.11",
+          durationMinutes: 180,
+        },
+      });
+      expect(tooLong.statusCode).toBe(400);
+
+      const currentIp = await built.app.inject({
+        method: "GET",
+        url: "/api/platform/ip",
+        headers: {
+          cookie: cookie ?? "",
+          "cf-connecting-ip": "198.51.100.8",
+        },
+      });
+      expect(currentIp.statusCode).toBe(200);
+      expect(currentIp.json()).toEqual({ ip: "198.51.100.8" });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("expires development IP bypass rules and serves real documentation pages", async () => {
+    const file = temporaryFile("bypass-apps.json");
+    const key = randomBytes(32);
+    const sites: SiteConfig[] = [];
+    const store = new PlatformStore(file, key, sites);
+    await store.load();
+    const created = await store.create(
+      { sub: "user-1", name: "Test User" },
+      { name: "Bypass App", origins: ["https://app.test"], actions: ["submit"] },
+    );
+
+    await expect(store.setIpBypass("user-1", created.id, "bad-ip", 60)).resolves.toBeUndefined();
+    await expect(
+      store.setIpBypass("user-1", created.id, "203.0.113.10", 180),
+    ).resolves.toBeUndefined();
+    await expect(
+      store.setIpBypass("user-1", created.id, "203.0.113.10", 179),
+    ).resolves.toMatchObject({
+      ipBypasses: [{ ip: "203.0.113.10" }],
+    });
+    expect(store.activeIpBypass(created.siteKey, "203.0.113.10")).toBeTruthy();
+    expect(store.activeIpBypass(created.siteKey, "203.0.113.11")).toBeUndefined();
+    expect(
+      store.activeIpBypass(
+        created.siteKey,
+        "203.0.113.10",
+        Date.now() + 180 * 60_000,
+      ),
+    ).toBeUndefined();
+    await expect(
+      store.clearIpBypass("user-1", created.id, "203.0.113.10"),
+    ).resolves.toMatchObject({ ipBypasses: [] });
+
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-docs-")),
+    });
+    try {
+      for (const path of ["/docs", "/docs/embed", "/docs/integration", "/docs/platform"]) {
+        const response = await built.app.inject({ method: "GET", url: path });
+        expect(response.statusCode).toBe(200);
+        expect(response.body).toContain("OxygenChallenge");
+        expect(response.body).toContain('class="doc-hero"');
+        expect(response.body).toContain("docs-language-banner");
+      }
+      const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
+      expect(openapi.statusCode).toBe(200);
+      expect(openapi.body).toContain("version: 26.0.0-alpha.7");
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("auto-completes a development IP through the existing Challenge API shape", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-bypass-")),
+    });
+    try {
+      const createdApp = await built.platformStore.create(
+        { sub: "user-1", name: "Test User" },
+        { name: "Bypass App", origins: ["https://app.test"], actions: ["submit"] },
+      );
+      await built.platformStore.setIpBypass(
+        "user-1",
+        createdApp.id,
+        "203.0.113.10",
+        60,
+      );
+      const headers = {
+        origin: "https://app.test",
+        "cf-connecting-ip": "203.0.113.10",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36",
+      };
+      const response = await built.app.inject({
+        method: "POST",
+        url: "/v1/challenges",
+        headers,
+        payload: {
+          siteKey: createdApp.siteKey,
+          action: "submit",
+          risk: "critical",
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        type: "human_check",
+        totalSteps: 1,
+        minDwellMs: 0,
+      });
+      expect(response.json()).not.toHaveProperty("bypass");
+
+      const verified = await built.app.inject({
+        method: "POST",
+        url: `/v1/challenges/${response.json<{ challengeId: string }>().challengeId}/verify`,
+        payload: { answer: "human", dwellMs: 0 },
+      });
+      expect(verified.statusCode).toBe(200);
+      expect(verified.json()).toMatchObject({
+        verified: true,
+        action: "submit",
+        siteKey: createdApp.siteKey,
+      });
+      expect(verified.json<{ token: string }>().token).toContain(".");
+
+      const embedded = await built.app.inject({
+        method: "GET",
+        url: `/embed?sitekey=${encodeURIComponent(createdApp.siteKey)}&action=submit&parentOrigin=${encodeURIComponent("https://app.test")}&launch=1`,
+        headers,
+      });
+      expect(embedded.statusCode).toBe(200);
+      expect(embedded.body).toContain('data-bypass="1"');
+      expect(embedded.body).toContain('data-challenge-type="human_check"');
     } finally {
       await built.app.close();
     }

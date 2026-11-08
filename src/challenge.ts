@@ -271,10 +271,11 @@ export class ChallengeStore {
     testMode = false,
     deviceClass: DeviceClass = "desktop",
     preview = false,
+    bypass = false,
   ): ChallengeState {
     this.cleanup();
 
-    const totalSteps = preview || accessible || requestedType
+    const totalSteps = bypass || preview || accessible || requestedType
       ? 1
       : (requestedSteps ?? RISK_STEPS[risk]);
     const sessionId = randomBytes(18).toString("base64url");
@@ -284,11 +285,13 @@ export class ChallengeStore {
       deviceClass === "mobile" && requestedType === "key_pointer"
         ? undefined
         : requestedType;
-    const types = chooseTypes(
-      totalSteps,
-      this.availableTypes(deviceClass),
-      accessible ? "inverse_occlusion" : explicitType,
-    );
+    const types = bypass
+      ? (["human_check"] as ChallengeType[])
+      : chooseTypes(
+          totalSteps,
+          this.availableTypes(deviceClass),
+          accessible ? "inverse_occlusion" : explicitType,
+        );
     const session: ChallengeSessionState = {
       id: sessionId,
       siteKey,
@@ -303,6 +306,7 @@ export class ChallengeStore {
       expiresAt,
       completed: false,
       testMode,
+      bypass,
       deviceClass,
       swapsRemaining: deviceClass === "desktop" ? 1 : 0,
     };
@@ -322,6 +326,7 @@ export class ChallengeStore {
         expiresAt,
         deviceClass,
         preview,
+        bypass,
       });
       this.challenges.set(state.id, state);
       session.challengeIds.push(state.id);
@@ -681,6 +686,7 @@ export class ChallengeStore {
     expiresAt: number;
     deviceClass: DeviceClass;
     preview: boolean;
+    bypass?: boolean;
   }): ChallengeState {
     const common = {
       id: randomBytes(18).toString("base64url"),
@@ -699,6 +705,7 @@ export class ChallengeStore {
       risk: input.risk,
       deviceClass: input.deviceClass,
       preview: input.preview,
+      ...(input.bypass ? { bypass: true } : {}),
       swapAllowed:
         input.preview ||
         (input.deviceClass === "desktop" &&
@@ -776,7 +783,12 @@ export class ChallengeStore {
       return {
         ...common,
         humanCheck: {
-          minDwellMs: input.preview ? 800 : randomInt(650, 1_200),
+          minDwellMs:
+            input.bypass
+              ? 0
+              : input.preview
+                ? 800
+                : randomInt(650, 1_200),
         },
       };
     }

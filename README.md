@@ -1,6 +1,6 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.6` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.7` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
 一次性验证令牌、风险会话和十五类交互挑战：
 
@@ -101,8 +101,12 @@ python tests/browser_smoke.py
 | `GET` | `/v1/meta` | API 与题型元信息 |
 | `GET` | `/healthz` | 健康检查 |
 | `GET` | `/platform` | OxygenAccount 开放平台 |
+| `GET` | `/docs` | 在线开发文档与接入示例 |
 | `GET` | `/auth/login` | OxygenAccount OIDC 登录 |
 | `GET/POST/DELETE` | `/api/platform/apps` | 创建、轮换与停用应用 |
+| `POST` | `/api/platform/apps/:id/bypass` | 为开发 IP 添加最长 179 分钟的免验证规则 |
+| `DELETE` | `/api/platform/apps/:id/bypass` | 删除指定开发 IP 免验证规则 |
+| `GET` | `/api/platform/ip` | 返回当前出口 IP，便于配置开发规则 |
 | `GET` | `/privacy-policy` | 隐私政策 |
 | `GET` | `/user-agreement` | 用户条款 |
 

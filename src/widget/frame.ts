@@ -143,6 +143,7 @@ const entryAccessibility = document.querySelector<HTMLButtonElement>(
 );
 const type = body.dataset.challengeType ?? "inverse_occlusion";
 const testMode = body.dataset.testMode === "1";
+const bypassActive = shell?.dataset.bypass === "1";
 const pageStartedAt = performance.now();
 const selected = new Set<number>();
 let audioChoice: string | null = null;
@@ -271,6 +272,14 @@ function showSuccessState(): void {
   post("resize", { height: 96, compact: true });
 }
 
+function scheduleSuccessState(callback?: () => void): void {
+  form?.classList.add("is-completing");
+  window.setTimeout(() => {
+    showSuccessState();
+    callback?.();
+  }, 260);
+}
+
 function launchChallenge(accessible = false): void {
   if (launching) {
     return;
@@ -305,6 +314,13 @@ function initEntry(): void {
   appendIcon(entryAccessibility, Accessibility);
   entryCheck.addEventListener("click", () => launchChallenge(false));
   entryAccessibility?.addEventListener("click", () => launchChallenge(true));
+  if (bypassActive) {
+    entryCheck.disabled = true;
+    if (entryLabel) {
+      entryLabel.textContent = "正在完成开发免验证…";
+    }
+    window.setTimeout(() => launchChallenge(false), 120);
+  }
 }
 
 function setStatus(message: string, tone: "neutral" | "error" | "success" = "neutral"): void {
@@ -2051,10 +2067,9 @@ form?.addEventListener("submit", async (event) => {
     if (result.verified && result.preview) {
       verified = true;
       play("success");
-      window.setTimeout(() => {
-        showSuccessState();
+      scheduleSuccessState(() => {
         post("preview-completed", { challengeType: body.dataset.challengeType });
-      }, 180);
+      });
       return;
     }
 
@@ -2063,14 +2078,13 @@ form?.addEventListener("submit", async (event) => {
       play("success");
       setStatus("验证成功。", "success");
       submit.disabled = true;
-      window.setTimeout(() => {
-        showSuccessState();
+      scheduleSuccessState(() => {
         post("verified", {
           token: result.token,
           siteKey: shell.dataset.siteKey,
           action: shell.dataset.action,
         });
-      }, 180);
+      });
       return;
     }
 
@@ -2111,3 +2125,15 @@ form?.addEventListener("submit", async (event) => {
     }
   }
 });
+
+if (type === "human_check" && bypassActive) {
+  window.setTimeout(() => {
+    if (humanInput) {
+      humanInput.checked = true;
+    }
+    if (submit) {
+      submit.disabled = false;
+    }
+    form?.requestSubmit();
+  }, 180);
+}

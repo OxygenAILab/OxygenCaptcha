@@ -5,6 +5,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./audio.js";
 import { ChallengeStore, RISK_STEPS, type VerificationResult } from "./challenge.js";
 import { loadConfig } from "./config.js";
+import { docsPageHtml } from "./docs.js";
 import { renderGridItemSvg, renderTargetSvg } from "./grid.js";
 import { registerPlatform } from "./platform.js";
 import { PlatformStore } from "./platform-store.js";
@@ -52,8 +54,8 @@ const CHALLENGE_TYPES = [
 
 const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 const API_VERSION = "1";
-const APP_VERSION = "v26.0-alpha.6";
-const ASSET_VERSION = "26.0.0-alpha.6";
+const APP_VERSION = "v26.0-alpha.7";
+const ASSET_VERSION = "26.0.0-alpha.7";
 
 const createSchema = z.object({
   siteKey: z.string().min(3).max(128),
@@ -778,8 +780,8 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
   ${state.type === "turnstile" ? '<script defer src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>' : ""}
   <script defer src="${escapeHtml(apiBase(config))}/frame.js?v=${ASSET_VERSION}"></script>
 </head>
-<body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}">
-  <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}" data-preview="${state.preview ? "1" : "0"}" data-swap-allowed="${state.swapAllowed ? "1" : "0"}">
+<body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}" data-bypass="${state.bypass ? "1" : "0"}">
+  <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}" data-preview="${state.preview ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}" data-swap-allowed="${state.swapAllowed ? "1" : "0"}">
     <form class="oc-card" id="oc-form" novalidate>
       <header class="oc-header">
         <div class="oc-brand">
@@ -831,6 +833,7 @@ function entryHtml(
     sessionId: string | undefined;
     accessible: boolean;
     testMode: boolean;
+    bypass: boolean;
   },
   config: AppConfig,
 ): string {
@@ -844,8 +847,8 @@ function entryHtml(
   <link rel="stylesheet" href="${base}/widget.css?v=${ASSET_VERSION}">
   <script defer src="${base}/frame.js?v=${ASSET_VERSION}"></script>
 </head>
-<body class="oc-frame oc-entry-page" data-entry="1" data-challenge-type="entry" data-test-mode="${state.testMode ? "1" : "0"}">
-  <main class="oc-shell oc-entry-shell" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(state.parentOrigin ?? "")}" data-accessible="${state.accessible ? "1" : "0"}">
+<body class="oc-frame oc-entry-page" data-entry="1" data-challenge-type="entry" data-test-mode="${state.testMode ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}">
+  <main class="oc-shell oc-entry-shell" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(state.parentOrigin ?? "")}" data-accessible="${state.accessible ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}">
     <section class="oc-entry" aria-label="OxygenChallenge">
       <div class="oc-entry-bar">
         <button class="oc-entry-check" id="oc-entry-check" type="button" aria-label="我是人类">
@@ -1001,6 +1004,42 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     });
   }
 
+  for (const [path, page] of [
+    ["/docs", "index"],
+    ["/docs/embed", "embed"],
+    ["/docs/integration", "integration"],
+    ["/docs/platform", "platform"],
+  ] as const) {
+    app.get(path, async (_request, reply) => {
+      reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "public, max-age=300")
+        .header(
+          "Content-Security-Policy",
+          "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        );
+      return reply.send(docsPageHtml(config, page));
+    });
+  }
+
+  app.get("/openapi.yaml", async (_request, reply) => {
+    for (const candidate of [
+      resolve(import.meta.dirname, "public", "openapi.yaml"),
+      resolve(import.meta.dirname, "..", "openapi.yaml"),
+    ]) {
+      try {
+        const document = await readFile(candidate, "utf8");
+        reply
+          .type("application/yaml; charset=utf-8")
+          .header("Cache-Control", "public, max-age=300");
+        return reply.send(document);
+      } catch {
+        continue;
+      }
+    }
+    return reply.code(404).send({ error: "OPENAPI_NOT_FOUND" });
+  });
+
   app.get("/v1/meta", async () => ({
       name: "OxygenChallenge",
       version: APP_VERSION,
@@ -1043,6 +1082,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
             sessionId: undefined,
             accessible,
             testMode: false,
+            bypass: false,
           },
           config,
         ),
@@ -1144,6 +1184,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       "risk assessed",
     );
 
+    const ip = clientIp({ headers: request.headers, ip: request.ip });
+    const bypass = platformStore.activeIpBypass(parsed.data.siteKey, ip);
+    if (bypass) {
+      request.log.info(
+        {
+          event: "challenge.bypass",
+          siteKey: parsed.data.siteKey,
+          ip,
+          expiresAt: bypass.expiresAt,
+        },
+        "challenge bypassed for development ip",
+      );
+    }
+
     const state = challenges.create(
       parsed.data.siteKey,
       parsed.data.action,
@@ -1154,6 +1208,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       parsed.data.steps,
       false,
       deviceClassFor(request),
+      false,
+      Boolean(bypass),
     );
 
     reply.header("X-Oxygen-Challenge-Id", state.id);
@@ -1408,6 +1464,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       sessionId: parsed.data.session,
       accessible: parsed.data.accessible,
       testMode,
+      bypass: false,
     };
     if (parsed.data.session) {
       const session = challenges.getSession(parsed.data.session);
@@ -1429,6 +1486,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         sessionId: session.id,
         accessible: parsed.data.accessible || session.accessible,
         testMode,
+        bypass: session.bypass,
       };
       if (parsed.data.launch) {
         state = challenges.currentState(session.id);
@@ -1452,6 +1510,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       if (!siteAllowsOrigin(site, parentOrigin)) {
         return reply.code(403).type("text/html").send(errorPage(403, "嵌入来源未授权"));
       }
+      const ip = clientIp({ headers: request.headers, ip: request.ip });
+      const bypass = platformStore.activeIpBypass(siteKey, ip);
       entry = {
         siteKey,
         action: parsed.data.action,
@@ -1459,7 +1519,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         sessionId: undefined,
         accessible: parsed.data.accessible,
         testMode,
+        bypass: Boolean(bypass),
       };
+      if (bypass) {
+        request.log.info(
+          {
+            event: "challenge.bypass",
+            siteKey,
+            ip,
+            expiresAt: bypass.expiresAt,
+          },
+          "challenge bypassed for development ip",
+        );
+      }
       if (!parsed.data.launch) {
         reply
           .type("text/html; charset=utf-8")
@@ -1491,6 +1563,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         parsed.data.steps,
         testMode,
         deviceClassFor(request),
+        false,
+        Boolean(bypass),
       );
     }
     if (!parsed.data.launch) {

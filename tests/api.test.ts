@@ -168,7 +168,12 @@ describe("OxygenChallenge API", () => {
       return { answer: String(countFromSeed(state.countFlash.seed)) };
     }
     if (state.type === "market_trade" && state.marketTrade) {
-      return { marketTrades: [bestMarketTrade(state.marketTrade.prices)] };
+      return {
+        marketTrades:
+          state.marketTrade.mode === "target"
+            ? targetMarketTrades(state.marketTrade)
+            : [bestMarketTrade(state.marketTrade.prices)],
+      };
     }
     if (state.type === "human_check" && state.humanCheck) {
       return { answer: "human", dwellMs: state.humanCheck.minDwellMs };

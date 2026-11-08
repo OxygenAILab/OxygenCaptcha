@@ -254,6 +254,7 @@ export type ChallengeState = {
   totalSteps?: number;
   risk?: RiskLevel;
   preview?: boolean;
+  bypass?: boolean;
   deviceClass?: DeviceClass;
   swapAllowed?: boolean;
   parentOrigin: string | null;
@@ -299,6 +300,7 @@ export type ChallengeSessionState = {
   expiresAt: number;
   completed: boolean;
   testMode: boolean;
+  bypass: boolean;
   deviceClass: DeviceClass;
   swapsRemaining: number;
 };

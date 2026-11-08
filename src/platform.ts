@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createHash, randomBytes } from "node:crypto";
+import { isIP } from "node:net";
 import { z } from "zod";
 import type { PlatformStore } from "./platform-store.js";
+import { clientIp } from "./risk.js";
 import type { AppConfig } from "./types.js";
 
 type OidcDiscovery = {
@@ -36,6 +38,23 @@ const createAppSchema = z.object({
   origins: z.array(z.string().url()).min(1).max(10),
   actions: z.array(z.string().min(1).max(64)).min(1).max(10),
 });
+
+const bypassSchema = z
+  .object({
+    ip: z.string().trim().min(2).max(64),
+    durationMinutes: z.number().int().min(1).max(179),
+  })
+  .refine((value) => isIP(value.ip) > 0, {
+    message: "IP address is invalid",
+  });
+
+const bypassDeleteSchema = z
+  .object({
+    ip: z.string().trim().min(2).max(64),
+  })
+  .refine((value) => isIP(value.ip) > 0, {
+    message: "IP address is invalid",
+  });
 
 function parseCookies(header: string | undefined): Record<string, string> {
   const result: Record<string, string> = {};
@@ -174,6 +193,17 @@ function platformHtml(config: AppConfig): string {
     .app-row h3 { margin:0 0 8px; font:700 19px/1.3 Georgia,"Songti SC",serif; }
     .app-row code { display:inline-flex; max-width:100%; padding:5px 7px; overflow:auto; border:1px solid #dde4ee; border-radius:4px; background:#f6f8fb; color:#315a9f; font:12px "Cascadia Code",Consolas,monospace; }
     .app-meta { margin-top:8px; color:#748094; font-size:12px; line-height:1.6; }
+    .bypass-panel { width:100%; margin-top:16px; padding-top:14px; border-top:1px solid #e4e9f0; }
+    .bypass-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .bypass-head strong { color:#263246; font-size:13px; }
+    .bypass-head span { color:#7a8699; font-size:11px; }
+    .bypass-form { display:grid; grid-template-columns:minmax(180px,1fr) 116px auto; gap:8px; width:100%; }
+    .bypass-form input { min-height:38px; font-size:14px; }
+    .bypass-form .button { min-width:88px; min-height:38px; padding:0 12px; font-size:12px; white-space:nowrap; }
+    .bypass-rules { display:grid; gap:6px; width:100%; margin-top:10px; }
+    .bypass-rule { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #e1e7ef; background:#f8fafc; color:#56647a; font-size:12px; }
+    .bypass-rule code { padding:0; border:0; background:transparent; color:#263246; font-size:12px; }
+    .bypass-rule button { min-height:30px; padding:0 8px; border:1px solid #efc1bc; border-radius:4px; background:#fff; color:#b42318; font-size:11px; }
     .app-actions { display:flex; align-items:flex-start; gap:8px; }
     .side-panel { border-top:3px solid #182130; background:#fff; padding:20px; }
     .side-panel h3 { margin:0 0 12px; font:700 19px/1.3 Georgia,"Songti SC",serif; }
@@ -193,7 +223,7 @@ function platformHtml(config: AppConfig): string {
     .secret code { white-space:normal; word-break:break-all; }
     .account-name { color:#35445c; font-size:12px; }
     .notice { border-radius:0; }
-    @media (max-width:900px){ .workspace-grid,.login-view{grid-template-columns:1fr}.workspace-side{position:static}.platform-intro{grid-template-columns:1fr}.platform-state{padding-left:0;border-left:0}.metrics{grid-template-columns:1fr}.metric{border-right:0;border-bottom:1px solid #e4e9f0}.metric:last-child{border-bottom:0} }
+    @media (max-width:900px){ .workspace-grid,.login-view{grid-template-columns:1fr}.workspace-side{position:static}.platform-intro{grid-template-columns:1fr}.platform-state{padding-left:0;border-left:0}.metrics{grid-template-columns:1fr}.metric{border-right:0;border-bottom:1px solid #e4e9f0}.metric:last-child{border-bottom:0}.bypass-form{grid-template-columns:1fr}.bypass-head{display:grid} }
   </style>
 </head>
 <body data-platform-enabled="${enabled ? "1" : "0"}" data-login-url="/auth/login">
@@ -225,7 +255,7 @@ function platformHtml(config: AppConfig): string {
       <div class="loading">正在读取登录状态…</div>
     </section>
   </main>
-  <script defer src="/platform.js?v=26.0.0-alpha.6"></script>
+  <script defer src="/platform.js?v=26.0.0-alpha.7"></script>
 </body>
 </html>`;
 }
@@ -438,6 +468,14 @@ export async function registerPlatform(
     return { apps: store.list(session.user.sub) };
   });
 
+  app.get("/api/platform/ip", async (request, reply) => {
+    const session = requireSession(request, reply);
+    if (!session) {
+      return;
+    }
+    return { ip: clientIp({ headers: request.headers, ip: request.ip }) };
+  });
+
   app.post("/api/platform/apps", async (request, reply) => {
     const session = requireSession(request, reply);
     if (!session || !requireCsrf(request, reply, session)) {
@@ -486,5 +524,44 @@ export async function registerPlatform(
       return reply.code(404).send({ error: "APP_NOT_FOUND" });
     }
     return { archived: true };
+  });
+
+  app.post("/api/platform/apps/:id/bypass", async (request, reply) => {
+    const session = requireSession(request, reply);
+    if (!session || !requireCsrf(request, reply, session)) {
+      return;
+    }
+    const parsed = bypassSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_IP_BYPASS", issues: parsed.error.issues });
+    }
+    const { id } = request.params as { id: string };
+    const app = await store.setIpBypass(
+      session.user.sub,
+      id,
+      parsed.data.ip,
+      parsed.data.durationMinutes,
+    );
+    if (!app) {
+      return reply.code(404).send({ error: "APP_NOT_FOUND" });
+    }
+    return app;
+  });
+
+  app.delete("/api/platform/apps/:id/bypass", async (request, reply) => {
+    const session = requireSession(request, reply);
+    if (!session || !requireCsrf(request, reply, session)) {
+      return;
+    }
+    const parsed = bypassDeleteSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_IP_BYPASS" });
+    }
+    const { id } = request.params as { id: string };
+    const app = await store.clearIpBypass(session.user.sub, id, parsed.data.ip);
+    if (!app) {
+      return reply.code(404).send({ error: "APP_NOT_FOUND" });
+    }
+    return app;
   });
 }

@@ -6,7 +6,7 @@ import struct
 import time
 import wave
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from playwright.sync_api import Browser, Page, sync_playwright
 
@@ -116,9 +116,15 @@ def assert_no_horizontal_overflow(page: Page) -> None:
 
 def wait_for_status(page: Page, fragment: str) -> str:
     page.wait_for_function(
-        "(fragment) => document.querySelector('#oc-status')?.textContent.includes(fragment)",
+        """(fragment) => {
+          const status = document.querySelector('#oc-status')?.textContent ?? "";
+          const compact = document.querySelector('.oc-entry-label')?.textContent ?? "";
+          return status.includes(fragment) || compact.includes("验证通过");
+        }""",
         arg=fragment,
     )
+    if page.locator(".oc-entry-label").count():
+        return page.locator(".oc-entry-label").inner_text()
     return page.locator("#oc-status").inner_text()
 
 
@@ -800,6 +806,27 @@ def run_site_checks(browser: Browser) -> None:
         )
         assert not legal_errors, legal_errors
 
+    for path, fragment in (
+        ("/docs", "OxygenChallenge Developer Docs"),
+        ("/docs/embed", "Embed the widget"),
+        ("/docs/integration", "Server integration"),
+        ("/docs/platform", "Open Platform"),
+    ):
+        docs_page, docs_errors = open_page(browser, {"width": 900, "height": 760})
+        docs_page.goto(f"{BASE}{path}", wait_until="networkidle")
+        assert docs_page.locator("#docs-language-banner").is_visible()
+        docs_page.locator('[data-docs-language="en"]').click()
+        docs_page.wait_for_function(
+            "() => document.documentElement?.dataset.lang === 'en'"
+        )
+        assert fragment in docs_page.locator("h1").inner_text()
+        assert_no_horizontal_overflow(docs_page)
+        docs_page.screenshot(
+            path=str(OUT / f"desktop-{path.strip('/').replace('/', '-')}.png"),
+            full_page=True,
+        )
+        assert not docs_errors, docs_errors
+
 
 def solve_current(page: Page, state: dict, submit: bool = True) -> None:
     challenge_type = state["type"]
@@ -917,7 +944,7 @@ button{{min-height:44px;margin-top:12px}}
     )
     iframe_src = widget.evaluate("(el) => el.shadowRoot.querySelector('iframe').src")
     assert "challengeType=inverse_occlusion" in iframe_src, iframe_src
-    assert "parentOrigin=http%3A%2F%2F127.0.0.1%3A8792" in iframe_src, iframe_src
+    assert f"parentOrigin={quote(HOST_BASE, safe='')}" in iframe_src, iframe_src
 
     host.wait_for_timeout(600)
     iframe_handle = widget.evaluate_handle(
@@ -931,8 +958,30 @@ button{{min-height:44px;margin-top:12px}}
         "(el) => el.shadowRoot.querySelector('iframe').getBoundingClientRect().height"
     )
     assert 90 <= initial_iframe_height <= 110, initial_iframe_height
+    host.evaluate(
+        """() => {
+          window.__ocHeights = [];
+          const started = performance.now();
+          const sample = () => {
+            const frame = document.querySelector('oxygen-challenge')
+              ?.shadowRoot?.querySelector('iframe');
+            if (frame) window.__ocHeights.push(frame.getBoundingClientRect().height);
+            if (performance.now() - started < 1_500) requestAnimationFrame(sample);
+          };
+          sample();
+        }"""
+    )
     frame.locator("#oc-entry-check").click()
     frame.wait_for_selector("#oc-form", state="visible")
+    host.wait_for_timeout(700)
+    expansion_heights = host.evaluate("window.__ocHeights")
+    assert max(expansion_heights) > initial_iframe_height + 80, expansion_heights
+    intermediate = {
+        round(height)
+        for height in expansion_heights
+        if initial_iframe_height + 8 < height < max(expansion_heights) - 8
+    }
+    assert len(intermediate) >= 3, expansion_heights
     identifier = frame.locator(".oc-shell").get_attribute("data-challenge-id")
     assert identifier
     state = frame.locator(".oc-shell").evaluate(

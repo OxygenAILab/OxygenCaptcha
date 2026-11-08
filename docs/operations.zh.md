@@ -50,6 +50,20 @@ python tests/browser_smoke.py
 Web Component 的向上展开与成功收起。
 截图写入 `_devdocs/evidence/`，不提交到 Private 仓库。
 
+alpha.7 的针对性回归可拆开执行：
+
+```powershell
+# 本地服务已运行在 8897 时，验证展开/收起、文档页与平台入口
+python tests/alpha7_visual_probe.py
+
+# 单独启动带 mock OxygenAccount 的平台测试服务
+node --import tsx tests/alpha7_platform_harness.ts
+
+# 另一个终端：验证平台免验证 UI 与浏览器自动完成
+python tests/alpha7_platform_probe.py
+python tests/alpha7_bypass_probe.py
+```
+
 ## systemd
 
 `systemd/oxygenchallenge.service` 是模板。部署后：

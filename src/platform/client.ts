@@ -21,6 +21,11 @@ type PlatformApp = {
   origins: string[];
   actions: string[];
   createdAt: string;
+  ipBypasses: Array<{
+    ip: string;
+    createdAt: string;
+    expiresAt: string;
+  }>;
   secret?: string;
 };
 
@@ -62,6 +67,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-platform-language]").forEach
   });
 });
 let csrf = "";
+let currentIp = "";
 
 function t(zh: string, en: string): string {
   return language === "en" ? en : zh;
@@ -74,6 +80,16 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(date);
 }
 
 function renderLogin(): void {
@@ -104,6 +120,15 @@ function renderLogin(): void {
 }
 
 function appMarkup(app: PlatformApp): string {
+  const bypasses = app.ipBypasses
+    .map(
+      (rule) => `
+        <div class="bypass-rule">
+          <span><code>${escapeHtml(rule.ip)}</code> · ${t("到期", "Expires")} ${escapeHtml(formatDate(rule.expiresAt))}</span>
+          <button type="button" data-bypass-delete="${escapeHtml(rule.ip)}" data-id="${escapeHtml(app.id)}">${t("删除", "Remove")}</button>
+        </div>`,
+    )
+    .join("");
   return `
     <article class="app-row" data-app-id="${escapeHtml(app.id)}">
       <div>
@@ -111,6 +136,21 @@ function appMarkup(app: PlatformApp): string {
         <code>${escapeHtml(app.siteKey)}</code>
         <div class="app-meta">${app.origins.map(escapeHtml).join(" · ")}</div>
         <div class="app-meta">actions: ${app.actions.map(escapeHtml).join(", ")}</div>
+        <section class="bypass-panel">
+          <div class="bypass-head">
+            <strong>${t("开发 IP 免验证", "Development IP bypass")}</strong>
+            <span>${t("仅用于开发与测试，最长 179 分钟", "Development and testing only, up to 179 minutes")}</span>
+          </div>
+          <form class="bypass-form" data-bypass-form data-id="${escapeHtml(app.id)}">
+            <input name="ip" inputmode="decimal" autocomplete="off" required aria-label="${t("IP 地址", "IP address")}" placeholder="${t("例如 203.0.113.10", "For example 203.0.113.10")}" value="${escapeHtml(currentIp)}">
+            <input name="durationMinutes" type="number" min="1" max="179" step="1" required aria-label="${t("有效分钟数", "Duration in minutes")}" value="60">
+            <button class="button secondary" type="submit">${t("添加规则", "Add rule")}</button>
+          </form>
+          <div class="bypass-rules">${
+            bypasses ||
+            `<div class="bypass-rule"><span>${t("当前没有生效中的开发 IP 规则。", "No active development IP rules.")}</span></div>`
+          }</div>
+        </section>
       </div>
       <div class="app-actions">
         <button class="button secondary" data-copy-site="${escapeHtml(app.siteKey)}" type="button">${t("复制 site key", "Copy site key")}</button>
@@ -187,6 +227,7 @@ async function loadApps(): Promise<void> {
           )}</p>
           <code>&lt;oxygen-challenge sitekey="..."&gt;&lt;/oxygen-challenge&gt;</code>
           <div class="side-links">
+            <a href="/docs/platform" target="_blank" rel="noopener noreferrer">${t("开放平台文档", "Platform guide")}</a>
             <a href="/docs/embed" target="_blank" rel="noopener noreferrer">${t("嵌入文档", "Embed guide")}</a>
             <a href="/docs/integration" target="_blank" rel="noopener noreferrer">${t("服务端校验", "Server verification")}</a>
             <a href="/v1/meta" target="_blank" rel="noopener noreferrer">API Meta</a>
@@ -277,6 +318,82 @@ async function loadApps(): Promise<void> {
     });
   });
 
+  root.querySelectorAll<HTMLFormElement>("[data-bypass-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = form.dataset.id;
+      if (!id) {
+        return;
+      }
+      const data = new FormData(form);
+      const ip = String(data.get("ip") ?? "").trim();
+      const durationMinutes = Number.parseInt(
+        String(data.get("durationMinutes") ?? "60"),
+        10,
+      );
+      const response = await fetch(
+        `/api/platform/apps/${encodeURIComponent(id)}/bypass`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrf,
+          },
+          body: JSON.stringify({ ip, durationMinutes }),
+        },
+      );
+      const body = (await response.json()) as PlatformApp & { error?: string };
+      if (!response.ok) {
+        showSecret(
+          `${t("免验证规则添加失败", "Could not add bypass rule")}: ${body.error ?? "INVALID_IP_BYPASS"}`,
+          true,
+        );
+        return;
+      }
+      showSecret(
+        t(
+          `已为 ${ip} 添加开发免验证规则。`,
+          `Development bypass added for ${ip}.`,
+        ),
+        false,
+      );
+      await loadApps();
+    });
+  });
+
+  root.querySelectorAll<HTMLButtonElement>("[data-bypass-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.id;
+      const ip = button.dataset.bypassDelete;
+      if (!id || !ip) {
+        return;
+      }
+      button.disabled = true;
+      const response = await fetch(
+        `/api/platform/apps/${encodeURIComponent(id)}/bypass`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrf,
+          },
+          body: JSON.stringify({ ip }),
+        },
+      );
+      const body = (await response.json()) as PlatformApp & { error?: string };
+      if (!response.ok) {
+        showSecret(
+          `${t("免验证规则删除失败", "Could not remove bypass rule")}: ${body.error ?? "INVALID_IP_BYPASS"}`,
+          true,
+        );
+        button.disabled = false;
+        return;
+      }
+      showSecret(t(`已删除 ${ip} 的免验证规则。`, `Removed the bypass rule for ${ip}.`), false);
+      await loadApps();
+    });
+  });
+
   root.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const id = button.dataset.id;
@@ -332,6 +449,14 @@ async function main(): Promise<void> {
     return;
   }
   csrf = session.csrf;
+  try {
+    const ipResponse = await fetch("/api/platform/ip");
+    if (ipResponse.ok) {
+      currentIp = ((await ipResponse.json()) as { ip?: string }).ip ?? "";
+    }
+  } catch {
+    currentIp = "";
+  }
   if (accountName) {
     accountName.classList.add("account-name");
     accountName.innerHTML = `${

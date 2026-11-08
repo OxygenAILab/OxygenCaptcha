@@ -13,7 +13,8 @@ const SOURCE_ORIGIN = scriptOrigin();
 function inlineWidgetStyle(): string {
   return [
     ":host{position:relative;z-index:2147483000;display:block;width:var(--oc-width,400px);max-width:100%;height:96px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
-    "iframe{position:absolute;left:0;bottom:0;display:block;width:100%;height:96px;border:0;border-radius:0;background:transparent}",
+    "iframe{position:absolute;left:0;bottom:0;display:block;width:100%;height:96px;border:0;border-radius:0;background:transparent;overflow:hidden;transition:height 460ms cubic-bezier(.32,.72,0,1),bottom 460ms cubic-bezier(.32,.72,0,1);will-change:height,bottom}",
+    "@media(prefers-reduced-motion:reduce){iframe{transition:none}}",
     ".oc-error{padding:16px;border:1px solid rgba(127,29,29,.35);border-radius:8px;color:#7f1d1d;background:#fef2f2;font:14px/1.5 system-ui,sans-serif}",
   ].join("");
 }
@@ -36,6 +37,7 @@ class OxygenChallengeElement extends HTMLElement {
     this.hiddenInput = null;
     if (this.frame) {
       this.frame.style.height = "96px";
+      this.frame.style.bottom = "0";
       this.frame.src = this.frameSource();
     }
   }

@@ -53,6 +53,9 @@ https://captcha.oxygenai.top/auth/callback
 | `GET` | `/api/platform/apps` | 当前用户拥有的应用 |
 | `POST` | `/api/platform/apps` | 创建应用 |
 | `POST` | `/api/platform/apps/:id/rotate` | 轮换 secret，旧值立即失效 |
+| `POST` | `/api/platform/apps/:id/bypass` | 添加最长 179 分钟的开发 IP 免验证规则 |
+| `DELETE` | `/api/platform/apps/:id/bypass` | 删除指定 IP 的开发免验证规则 |
+| `GET` | `/api/platform/ip` | 返回当前出口 IP，便于填写开发规则 |
 | `DELETE` | `/api/platform/apps/:id` | 停用应用并删除动态 site key |
 
 创建请求：
@@ -67,6 +70,22 @@ https://captcha.oxygenai.top/auth/callback
 
 创建响应会包含一次性展示的 `secret`。应用 secret 使用 AES-256-GCM 加密保存到
 `OXY_PLATFORM_DATA_FILE`；数据密钥来自 `OXY_PLATFORM_DATA_KEY_BASE64`。
+
+## 开发 IP 免验证
+
+开发与验收阶段可以为某个应用登记精确 IP，有效期为 1 到 179 分钟。命中规则的
+`POST /v1/challenges` 与 `/embed` 不改变接口形状：服务端仍生成标准单步
+`human_check`，但 `minDwellMs=0`；Web Component 会自动提交，调用方最终仍取得正常
+一次性 token。
+
+```json
+{
+  "ip": "203.0.113.10",
+  "durationMinutes": 60
+}
+```
+
+该机制仅用于开发与测试，不是生产白名单。规则过期后自动失效，也可以在开放平台手动删除。
 
 ## 服务端环境变量
 

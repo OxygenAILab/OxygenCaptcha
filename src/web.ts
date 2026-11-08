@@ -261,7 +261,7 @@ export function officialSiteHtml(config: AppConfig): string {
       <span><a href="/privacy-policy" data-i18n="footer.privacy">隐私政策</a> · <a href="/user-agreement" data-i18n="footer.terms">用户条款</a> · <a href="/v1/meta">API Meta</a> · <a href="https://github.com/OxygenAILab/OxygenChallenge">Private source</a></span>
     </div>
   </footer>
-  <script src="${origin}/widget.js?v=26.0.0-alpha.6" defer></script>
+  <script src="${origin}/widget.js?v=26.0.0-alpha.7" defer></script>
   <script>
     (() => {
       const translations = ${JSON.stringify(translations)};

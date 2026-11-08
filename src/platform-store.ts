@@ -5,6 +5,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { dirname, resolve } from "node:path";
 import type { SiteConfig } from "./types.js";
 
@@ -20,6 +21,11 @@ type StoredApp = {
   createdAt: string;
   updatedAt: string;
   active: boolean;
+  ipBypasses: Array<{
+    ip: string;
+    createdAt: string;
+    expiresAt: string;
+  }>;
 };
 
 type StoreDocument = {
@@ -38,6 +44,11 @@ export type PlatformApp = {
   createdAt: string;
   updatedAt: string;
   active: boolean;
+  ipBypasses: Array<{
+    ip: string;
+    createdAt: string;
+    expiresAt: string;
+  }>;
 };
 
 export type CreatedPlatformApp = PlatformApp & {
@@ -63,7 +74,13 @@ export class PlatformStore {
       if (parsed.version !== 1 || !Array.isArray(parsed.apps)) {
         throw new Error("Unsupported platform data file");
       }
-      this.document = parsed;
+      this.document = {
+        version: 1,
+        apps: parsed.apps.map((app) => ({
+          ...app,
+          ipBypasses: Array.isArray(app.ipBypasses) ? app.ipBypasses : [],
+        })),
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
@@ -108,6 +125,7 @@ export class PlatformStore {
       createdAt: now,
       updatedAt: now,
       active: true,
+      ipBypasses: [],
     };
     this.document.apps.push(app);
     this.sites.push({
@@ -155,9 +173,87 @@ export class PlatformStore {
     return true;
   }
 
+  activeIpBypass(
+    siteKey: string,
+    ip: string,
+    now = Date.now(),
+  ): { appId: string; expiresAt: string } | undefined {
+    const app = this.document.apps.find(
+      (candidate) => candidate.siteKey === siteKey && candidate.active,
+    );
+    const rule = app?.ipBypasses.find(
+      (candidate) =>
+        candidate.ip === ip && Date.parse(candidate.expiresAt) > now,
+    );
+    return app && rule
+      ? { appId: app.id, expiresAt: rule.expiresAt }
+      : undefined;
+  }
+
+  async setIpBypass(
+    ownerSub: string,
+    id: string,
+    ip: string,
+    durationMinutes: number,
+  ): Promise<PlatformApp | undefined> {
+    const app = this.document.apps.find(
+      (candidate) =>
+        candidate.id === id && candidate.ownerSub === ownerSub && candidate.active,
+    );
+    if (
+      !app ||
+      !isIP(ip) ||
+      !Number.isInteger(durationMinutes) ||
+      durationMinutes < 1 ||
+      durationMinutes > 179
+    ) {
+      return undefined;
+    }
+    const now = Date.now();
+    const rule = {
+      ip,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + durationMinutes * 60_000).toISOString(),
+    };
+    app.ipBypasses = [
+      ...app.ipBypasses.filter(
+        (candidate) =>
+          candidate.ip !== ip && Date.parse(candidate.expiresAt) > now,
+      ),
+      rule,
+    ];
+    app.updatedAt = rule.createdAt;
+    await this.persist();
+    return this.publicApp(app);
+  }
+
+  async clearIpBypass(
+    ownerSub: string,
+    id: string,
+    ip: string,
+  ): Promise<PlatformApp | undefined> {
+    const app = this.document.apps.find(
+      (candidate) =>
+        candidate.id === id && candidate.ownerSub === ownerSub && candidate.active,
+    );
+    if (!app) {
+      return undefined;
+    }
+    app.ipBypasses = app.ipBypasses.filter((candidate) => candidate.ip !== ip);
+    app.updatedAt = new Date().toISOString();
+    await this.persist();
+    return this.publicApp(app);
+  }
+
   private publicApp(app: StoredApp): PlatformApp {
     const { encryptedSecret: _, ...rest } = app;
-    return rest;
+    const now = Date.now();
+    return {
+      ...rest,
+      ipBypasses: app.ipBypasses.filter(
+        (candidate) => Date.parse(candidate.expiresAt) > now,
+      ),
+    };
   }
 
   private encrypt(value: string): string {
