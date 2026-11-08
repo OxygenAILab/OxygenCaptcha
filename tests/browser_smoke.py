@@ -986,6 +986,13 @@ button{{min-height:44px;margin-top:12px}}
     )
     frame.locator("#oc-entry-check").click()
     frame.wait_for_selector("#oc-form", state="visible")
+    scrollbar_style = frame.evaluate(
+        """() => ({
+          scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
+          bodyOverflowX: getComputedStyle(document.body).overflowX
+        })"""
+    )
+    assert scrollbar_style == {"scrollbarWidth": "none", "bodyOverflowX": "hidden"}
     host.wait_for_timeout(700)
     expansion_heights = host.evaluate("window.__ocHeights")
     assert max(expansion_heights) > initial_iframe_height + 80, expansion_heights
@@ -1011,28 +1018,44 @@ button{{min-height:44px;margin-top:12px}}
     host.wait_for_function(
         """() => {
           const widget = document.querySelector('oxygen-challenge');
-          return Boolean(widget?.querySelector('input[name="oxygen-token"]')?.value);
+          return Boolean(widget?.closest('form')
+            ?.querySelector('input[name="oxygen-token"]')?.value);
         }"""
     )
     token = widget.evaluate(
-        "(el) => el.querySelector('input[name=\"oxygen-token\"]')?.value"
+        """(el) => el.closest('form')
+          ?.querySelector('input[name="oxygen-token"]')?.value"""
     )
     assert token and token.count(".") == 2, token
+    assert widget.evaluate("(el) => el.querySelector('input') === null")
     assert host.evaluate("window.__ocVerifiedEvents.length") == 1
     assert host.evaluate("window.__ocCompleteEvents.length") == 1
-    assert frame.locator(".oc-entry-label").inner_text() == "验证通过"
     host.wait_for_function(
+        """() => document.querySelector('oxygen-challenge')
+          ?.shadowRoot?.querySelector('.oc-success-label')
+          ?.textContent.includes('验证通过')"""
+    )
+    assert widget.evaluate(
+        "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
+    ) == "验证通过"
+    assert widget.evaluate("(el) => el.shadowRoot.querySelector('iframe') === null")
+    assert 90 <= widget.bounding_box()["height"] <= 110
+    host.evaluate(
         """() => {
-          const iframe = document.querySelector('oxygen-challenge')
-            ?.shadowRoot?.querySelector('iframe');
-          return iframe ? iframe.getBoundingClientRect().height <= 110 : false;
-        }""",
-        timeout=5_000,
+          const widget = document.querySelector('oxygen-challenge');
+          const parent = widget.parentElement;
+          widget.remove();
+          parent.appendChild(widget);
+        }"""
     )
-    iframe_height = widget.evaluate(
-        "(el) => el.shadowRoot.querySelector('iframe').getBoundingClientRect().height"
+    host.wait_for_timeout(300)
+    assert widget.evaluate(
+        "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
+    ) == "验证通过"
+    assert host.evaluate(
+        """() => Boolean(document.querySelector('form')
+          ?.querySelector('input[name="oxygen-token"]')?.value)"""
     )
-    assert 90 <= iframe_height <= 110, iframe_height
     host.screenshot(path=str(OUT / "desktop-host.png"), full_page=True)
     context.close()
 

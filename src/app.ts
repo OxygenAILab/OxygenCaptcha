@@ -54,8 +54,8 @@ const CHALLENGE_TYPES = [
 
 const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 const API_VERSION = "1";
-const APP_VERSION = "v26.0-alpha.8";
-const ASSET_VERSION = "26.0.0-alpha.8";
+const APP_VERSION = "v26.0-alpha.9";
+const ASSET_VERSION = "26.0.0-alpha.9";
 
 const createSchema = z.object({
   siteKey: z.string().min(3).max(128),

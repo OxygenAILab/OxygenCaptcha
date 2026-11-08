@@ -101,6 +101,14 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
         assert 90 <= initial_height <= 110, initial_height
         host.evaluate(
             """() => {
+              window.__ocMessages = [];
+              window.addEventListener('message', event => {
+                window.__ocMessages.push({
+                  origin: event.origin,
+                  type: event.data?.type,
+                  height: event.data?.height
+                });
+              });
               window.__expansionHeights = [];
               const start = performance.now();
               const sample = () => {
@@ -113,10 +121,33 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
             }"""
         )
         frame.locator("#oc-entry-check").click()
-        frame.wait_for_selector("#oc-form", state="visible")
+        try:
+            frame.wait_for_selector("#oc-form", state="visible")
+        except Exception:
+            print("frame-state", {"url": frame.url, "body": frame.content()[:1200]})
+            raise
+        scrollbar_style = frame.evaluate(
+            """() => ({
+              scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
+              bodyOverflowX: getComputedStyle(document.body).overflowX
+            })"""
+        )
+        assert scrollbar_style == {"scrollbarWidth": "none", "bodyOverflowX": "hidden"}
         host.wait_for_timeout(900)
         expansion_heights = host.evaluate("window.__expansionHeights")
         expanded_height = max(expansion_heights)
+        if expanded_height <= initial_height + 100:
+            print(
+                "expansion-debug",
+                host.evaluate(
+                    """() => ({
+                      messages: window.__ocMessages,
+                      src: document.querySelector('oxygen-challenge')
+                        ?.shadowRoot?.querySelector('iframe')?.src
+                    })"""
+                ),
+                {"frameUrl": frame.url, "frameBody": frame.content()[:400]},
+            )
         assert expanded_height > initial_height + 100, expansion_heights
         expansion_mid = {
             round(value)
@@ -146,20 +177,27 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
             }"""
         )
         frame.locator("#oc-submit").click()
-        frame.wait_for_function(
-            "() => document.querySelector('.oc-entry-label')?.textContent.includes('验证通过')"
-        )
-        host.wait_for_function(
-            """() => {
-              const iframe = document.querySelector('oxygen-challenge')
-                ?.shadowRoot?.querySelector('iframe');
-              return iframe ? iframe.getBoundingClientRect().height <= 110 : false;
-            }"""
-        )
+        try:
+            host.wait_for_function(
+                """() => document.querySelector('oxygen-challenge')
+                  ?.shadowRoot?.querySelector('.oc-success-label')
+                  ?.textContent.includes('验证通过')"""
+            )
+        except Exception:
+            print(
+                "widget-state",
+                host.evaluate(
+                    """() => ({
+                      events: window.__events,
+                      hidden: document.querySelector('form input[name="oxygen-token"]')?.value,
+                      html: document.querySelector('oxygen-challenge')?.shadowRoot?.innerHTML
+                    })"""
+                ),
+            )
+            raise
+        host.wait_for_timeout(500)
         collapse_heights = host.evaluate("window.__collapseHeights")
-        final_height = widget.evaluate(
-            "(el) => el.shadowRoot.querySelector('iframe').getBoundingClientRect().height"
-        )
+        final_height = widget.bounding_box()["height"]
         assert max(collapse_heights) > final_height + 100, collapse_heights
         collapse_mid = {
             round(value)
@@ -170,9 +208,27 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
         assert host.evaluate("window.__events.verified.length") == 1
         assert host.evaluate("window.__events.complete.length") == 1
         token = widget.evaluate(
-            "(el) => el.querySelector('input[name=\"oxygen-token\"]')?.value"
+            """(el) => el.closest('form')
+              ?.querySelector('input[name="oxygen-token"]')?.value"""
         )
         assert token and token.count(".") == 2
+        assert widget.evaluate("(el) => el.querySelector('input') === null")
+        assert widget.evaluate(
+            "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
+        ) == "验证通过"
+        assert widget.evaluate("(el) => el.shadowRoot.querySelector('iframe') === null")
+        host.evaluate(
+            """() => {
+              const widget = document.querySelector('oxygen-challenge');
+              const parent = widget.parentElement;
+              widget.remove();
+              parent.appendChild(widget);
+            }"""
+        )
+        host.wait_for_timeout(300)
+        assert widget.evaluate(
+            "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
+        ) == "验证通过"
         host.screenshot(path=str(OUT / "host-compact-success.png"), full_page=True)
         context.close()
 

@@ -1,6 +1,6 @@
 # 部署状态
 
-当前版本：`v26.0-alpha.8`
+当前版本：`v26.0-alpha.9`
 
 ## 已完成
 
@@ -15,7 +15,7 @@
   `Host: captcha.oxygenai.top`，均返回健康。
 - 使用 `curl --resolve captcha.oxygenai.top:443:154.219.110.138` 验证了目标域名路由、
   `/embed` 的诱饵文本、SVG overlay 和 `frame.js` 引用。
-- `v26.0-alpha.8` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
+- `v26.0-alpha.9` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
   low/medium/high/critical 风险步数。
 - 官网 `/`、随机挑战 `/captcha`、`/platform` 和 OxygenAccount OAuth 入口均已上线；
   官网顶部横幅会自动识别语言并支持中英文切换。
@@ -69,5 +69,9 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
   OxygenAI Tech., SG 运营者、实际香港/全球服务商数据路径、摄像头与麦克风本地处理、
   OxygenAccount、Cloudflare、开发 IP 免验证、客户嵌入责任、高风险用途限制、留存边界、
   用户权利、责任限制和 SIAC 争议解决，并修复法律文档目录锚点。
+- 2026-11-08：`v26.0-alpha.9` 部署完成。修复宿主重排或移动 `<oxygen-challenge>` 后
+  iframe 重载导致已完成状态回退为待验证的问题；Web Component 现在在宿主层保存 token
+  成功状态并渲染紧凑完成视图，隐藏字段不再作为自定义元素子节点插入；同时隐藏 iframe
+  内部滚动条外观，保留滚动可达性。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->

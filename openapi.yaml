@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.0-alpha.8
+  version: 26.0.0-alpha.9
   description: Risk-aware CAPTCHA API with visual, motion, audio, calculation, camera, speech and Cloudflare Turnstile challenges.
   license:
     name: Apache-2.0

@@ -116,6 +116,13 @@ with sync_playwright() as playwright:
         "() => document.querySelector('.oc-entry-label')?.textContent.includes('验证通过')",
         timeout=15_000,
     )
+    scrollbar_style = human.evaluate(
+        """() => ({
+          scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
+          bodyOverflowX: getComputedStyle(document.body).overflowX
+        })"""
+    )
+    assert scrollbar_style == {"scrollbarWidth": "none", "bodyOverflowX": "hidden"}
     human.screenshot(path=str(OUT / "production-human-success.png"), full_page=True)
     assert not human_errors, human_errors
 
