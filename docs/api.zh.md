@@ -1,6 +1,6 @@
 # OxygenChallenge API
 
-版本：`26.0.0-alpha.10`
+版本：`26.0.1`
 
 ## 先决条件
 

@@ -67,8 +67,8 @@ const ACCESSIBILITY_NEEDS = ["vision", "motor", "hearing", "speech", "cognitive"
 const API_VERSION = "1";
 const API_NEXT_VERSION = "2";
 const SUPPORTED_API_VERSIONS = [API_VERSION, API_NEXT_VERSION] as const;
-const APP_VERSION = "v26.0-alpha.10";
-const ASSET_VERSION = "26.0.0-alpha.10";
+const APP_VERSION = "v26.0.1";
+const ASSET_VERSION = "26.0.1";
 
 const clientContextSchema = z.object({
   timezone: z.string().trim().min(1).max(64),

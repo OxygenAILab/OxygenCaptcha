@@ -1,6 +1,6 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.10` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0.1` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
 一次性验证令牌、vNext 风险上下文、风险会话和十五类交互挑战：
 

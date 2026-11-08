@@ -237,6 +237,28 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
         assert widget.evaluate(
             "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
         ) == "验证通过"
+        host.evaluate(
+            """() => {
+              const current = document.querySelector('oxygen-challenge');
+              const replacement = document.createElement('oxygen-challenge');
+              for (const attribute of current.attributes) {
+                replacement.setAttribute(attribute.name, attribute.value);
+              }
+              current.replaceWith(replacement);
+            }"""
+        )
+        host.wait_for_timeout(300)
+        restored_widget = host.locator("oxygen-challenge")
+        assert restored_widget.evaluate(
+            "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
+        ) == "验证通过"
+        assert restored_widget.evaluate(
+            "(el) => Boolean(el.shadowRoot.querySelector('svg.oc-success-mark'))"
+        )
+        assert restored_widget.evaluate(
+            "(el) => el.shadowRoot.querySelector('iframe') === null"
+        )
+        assert host.locator('input[name="oxygen-token"]').input_value() == token
         host.screenshot(path=str(OUT / "host-compact-success.png"), full_page=True)
         context.close()
 

@@ -9,6 +9,28 @@ function scriptOrigin(): string {
 }
 
 const SOURCE_ORIGIN = scriptOrigin();
+const verifiedTokens = new Map<string, string>();
+
+function tokenIsUsable(token: string): boolean {
+  const parts = token.split(".");
+  if (parts.length !== 3 || !parts[1]) {
+    return false;
+  }
+  try {
+    const normalized = parts[1].replaceAll("-", "+").replaceAll("_", "/");
+    const padded = normalized.padEnd(
+      Math.ceil(normalized.length / 4) * 4,
+      "=",
+    );
+    const payload = JSON.parse(atob(padded)) as { exp?: number };
+    return (
+      typeof payload.exp !== "number" ||
+      payload.exp * 1_000 > Date.now()
+    );
+  } catch {
+    return false;
+  }
+}
 
 function collectClientContext(selectedLanguage: string): Record<string, unknown> {
   const navigatorWithHints = navigator as Navigator & {
@@ -82,16 +104,25 @@ class OxygenChallengeElement extends HTMLElement {
     }
     this.hiddenInput?.remove();
     this.hiddenInput = null;
+    const key = this.verifiedTokenKey();
+    if (key) {
+      verifiedTokens.delete(key);
+    }
     this.verifiedToken = null;
+    this.removeAttribute("data-verified");
     this.renderedSource = "";
     this.render();
   }
 
   private render(): void {
+    if (!this.verifiedToken) {
+      this.restoreVerifiedToken();
+    }
     if (this.verifiedToken) {
       this.renderCompactSuccess();
       return;
     }
+    this.removeAttribute("data-verified");
     const siteKey = this.getAttribute("sitekey") ?? this.getAttribute("site-key");
     if (!siteKey) {
       this.frame = null;
@@ -135,6 +166,10 @@ class OxygenChallengeElement extends HTMLElement {
       this.successRenderTimer = null;
     }
     window.removeEventListener("message", this.onMessage);
+    this.setAttribute("data-verified", "true");
+    if (this.verifiedToken) {
+      this.attachHiddenToken(this.verifiedToken);
+    }
     const shadow = this.shadowRoot ?? this.attachShadow({ mode: "open" });
     this.frame = null;
     this.renderedSource = "";
@@ -262,6 +297,10 @@ class OxygenChallengeElement extends HTMLElement {
       );
     } else if (data.type === "verified" && data.token) {
       this.verifiedToken = data.token;
+      const key = this.verifiedTokenKey();
+      if (key) {
+        verifiedTokens.set(key, data.token);
+      }
       this.attachHiddenToken(data.token);
       this.dispatchEvent(
         new CustomEvent("oxygenchallenge:verified", { detail: { token: data.token }, bubbles: true }),
@@ -298,13 +337,68 @@ class OxygenChallengeElement extends HTMLElement {
     if (!form) {
       return;
     }
-    if (!this.hiddenInput) {
+    const existing = this.findFormTokenInput(form, name);
+    if (existing) {
+      this.hiddenInput = existing;
+    }
+    if (
+      !this.hiddenInput ||
+      !this.hiddenInput.isConnected ||
+      this.hiddenInput.closest("form") !== form
+    ) {
       this.hiddenInput = document.createElement("input");
       this.hiddenInput.type = "hidden";
       this.hiddenInput.name = name;
       form.appendChild(this.hiddenInput);
     }
     this.hiddenInput.value = token;
+  }
+
+  private verifiedTokenKey(): string | null {
+    const siteKey =
+      this.getAttribute("sitekey") ?? this.getAttribute("site-key");
+    if (!siteKey) {
+      return null;
+    }
+    const action = this.getAttribute("action") ?? "submit";
+    const name = this.getAttribute("name") ?? "oxygen-token";
+    return `${siteKey}\u0000${action}\u0000${name}`;
+  }
+
+  private findFormTokenInput(
+    form: HTMLFormElement,
+    name: string,
+  ): HTMLInputElement | null {
+    return (
+      Array.from(form.elements).find(
+        (element): element is HTMLInputElement =>
+          element instanceof HTMLInputElement &&
+          element.type === "hidden" &&
+          element.name === name,
+      ) ?? null
+    );
+  }
+
+  private restoreVerifiedToken(): void {
+    const key = this.verifiedTokenKey();
+    if (!key) {
+      return;
+    }
+    const name = this.getAttribute("name") ?? "oxygen-token";
+    const form = this.closest("form");
+    const formToken = form ? this.findFormTokenInput(form, name)?.value : "";
+    const storedToken = verifiedTokens.get(key) ?? "";
+    const restored =
+      (formToken && tokenIsUsable(formToken) ? formToken : "") ||
+      (storedToken && tokenIsUsable(storedToken) ? storedToken : "");
+    if (!restored) {
+      if (storedToken && !tokenIsUsable(storedToken)) {
+        verifiedTokens.delete(key);
+      }
+      return;
+    }
+    this.verifiedToken = restored;
+    verifiedTokens.set(key, restored);
   }
 }
 
