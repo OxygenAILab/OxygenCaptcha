@@ -1,6 +1,6 @@
 # 部署状态
 
-当前版本：`v26.0-alpha.7`
+当前版本：`v26.0-alpha.8`
 
 ## 已完成
 
@@ -15,7 +15,7 @@
   `Host: captcha.oxygenai.top`，均返回健康。
 - 使用 `curl --resolve captcha.oxygenai.top:443:154.219.110.138` 验证了目标域名路由、
   `/embed` 的诱饵文本、SVG overlay 和 `frame.js` 引用。
-- `v26.0-alpha.7` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
+- `v26.0-alpha.8` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
   low/medium/high/critical 风险步数。
 - 官网 `/`、随机挑战 `/captcha`、`/platform` 和 OxygenAccount OAuth 入口均已上线；
   官网顶部横幅会自动识别语言并支持中英文切换。
@@ -65,5 +65,9 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
   `/docs/platform` 在线文档和 `/openapi.yaml` 静态描述。生产 Playwright smoke、桌面/移动
   官网、随机挑战、基础验证、Turnstile、摄像头权限路径、OAuth 入口和法律页面均通过；
   `/v1/meta`、官网资源查询串与 `/openapi.yaml` 均确认指向 `26.0.0-alpha.7`。
+- 2026-11-08：`v26.0-alpha.8` 部署完成。细化中英文隐私政策与用户协议，明确英文权威版本、
+  OxygenAI Tech., SG 运营者、实际香港/全球服务商数据路径、摄像头与麦克风本地处理、
+  OxygenAccount、Cloudflare、开发 IP 免验证、客户嵌入责任、高风险用途限制、留存边界、
+  用户权利、责任限制和 SIAC 争议解决，并修复法律文档目录锚点。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->

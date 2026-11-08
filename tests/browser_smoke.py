@@ -791,14 +791,27 @@ def run_site_checks(browser: Browser) -> None:
     platform.screenshot(path=str(OUT / "desktop-platform.png"), full_page=True)
     assert not platform_errors, platform_errors
 
-    for path, heading in (
-        ("/privacy-policy", "隐私政策"),
-        ("/user-agreement", "用户协议"),
+    for path, heading, english_heading, minimum_sections in (
+        ("/privacy-policy", "隐私政策", "Privacy Policy", 12),
+        ("/user-agreement", "用户协议", "User Agreement", 16),
     ):
         legal, legal_errors = open_page(browser, {"width": 900, "height": 760})
         legal.goto(f"{BASE}{path}", wait_until="networkidle")
+        if legal.locator("#legal-title").inner_text() != heading:
+            legal.locator('[data-language="zh"]').click()
         assert legal.locator("#legal-title").inner_text() == heading
         assert legal.locator("#legal-banner").is_visible()
+        assert legal.locator("#legal-language-priority").is_visible()
+        assert legal.locator("#legal-body section").count() >= minimum_sections
+        assert legal.evaluate(
+            """() => Array.from(document.querySelectorAll('#toc-links a'))
+              .every(anchor => document.querySelector(anchor.getAttribute('href')))"""
+        )
+        legal.locator('[data-language="en"]').click()
+        assert legal.locator("#legal-title").inner_text() == english_heading
+        assert "authoritative legal text" in legal.locator(
+            "#legal-language-priority"
+        ).inner_text()
         assert_no_horizontal_overflow(legal)
         legal.screenshot(
             path=str(OUT / f"desktop-{path.strip('/')}.png"),

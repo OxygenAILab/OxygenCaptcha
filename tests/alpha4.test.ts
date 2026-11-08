@@ -313,7 +313,7 @@ describe("alpha.6 risk helpers", () => {
   });
 });
 
-describe("alpha.7 Turnstile, platform persistence, docs, and IP bypass", () => {
+describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pages", () => {
   it("advertises API version 1 and rejects incompatible callers", async () => {
     const built = await buildApp({
       config: makeConfig(),
@@ -324,7 +324,7 @@ describe("alpha.7 Turnstile, platform persistence, docs, and IP bypass", () => {
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.7" });
+      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.8" });
 
       const mismatch = await built.app.inject({
         method: "POST",
@@ -613,7 +613,7 @@ describe("alpha.7 Turnstile, platform persistence, docs, and IP bypass", () => {
       }
       const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
       expect(openapi.statusCode).toBe(200);
-      expect(openapi.body).toContain("version: 26.0.0-alpha.7");
+      expect(openapi.body).toContain("version: 26.0.0-alpha.8");
     } finally {
       await built.app.close();
     }
@@ -681,6 +681,30 @@ describe("alpha.7 Turnstile, platform persistence, docs, and IP bypass", () => {
       expect(embedded.statusCode).toBe(200);
       expect(embedded.body).toContain('data-bypass="1"');
       expect(embedded.body).toContain('data-challenge-type="human_check"');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("serves refined bilingual legal documents with working section anchors", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-legal-")),
+    });
+    try {
+      for (const [path, lastSection] of [
+        ["/privacy-policy", 12],
+        ["/user-agreement", 16],
+      ] as const) {
+        const response = await built.app.inject({ method: "GET", url: path });
+        expect(response.statusCode).toBe(200);
+        expect(response.body).toContain('id="legal-language-priority"');
+        expect(response.body).toContain("authoritative legal text");
+        expect(response.body).toContain(`id="section-${lastSection}"`);
+        expect(response.body).toContain("contact@oxygenai.top");
+        expect(response.body).not.toContain("support@oxygenai.top");
+      }
     } finally {
       await built.app.close();
     }
