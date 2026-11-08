@@ -92,6 +92,11 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
             "(el) => el.shadowRoot.querySelector('iframe')"
         ).as_element()
         assert iframe_handle
+        iframe_src = widget.evaluate(
+            "(el) => el.shadowRoot.querySelector('iframe').src"
+        )
+        assert "apiVersion=2" in iframe_src
+        assert "clientContext=" in iframe_src
         frame = iframe_handle.content_frame()
         assert frame
         frame.wait_for_selector("#oc-entry-check", state="visible")
@@ -216,6 +221,9 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
         assert widget.evaluate(
             "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
         ) == "验证通过"
+        assert widget.evaluate(
+            "(el) => Boolean(el.shadowRoot.querySelector('svg.oc-success-mark'))"
+        )
         assert widget.evaluate("(el) => el.shadowRoot.querySelector('iframe') === null")
         host.evaluate(
             """() => {

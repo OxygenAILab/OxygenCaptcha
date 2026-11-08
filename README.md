@@ -1,8 +1,8 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.9` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0-alpha.10` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
-一次性验证令牌、风险会话和十五类交互挑战：
+一次性验证令牌、vNext 风险上下文、风险会话和十五类交互挑战：
 
 - `inverse_occlusion`：同色 DOM 诱饵 + 反色透明数字图。
 - `grid_select`：3×3 Lucide 图标多选。
@@ -20,9 +20,10 @@
 - `hand_motion`：WebCam 本地 MediaPipe 手部骨骼动态动作序列。
 - `speech_wave`：同一句多遍朗读，比较指定字词窗口的声学非严格一致性。
 
-自动风险评分会综合 UA、Sec-CH-UA、平台/系统版本、语言、Cloudflare 国家、IP 频次与
-UA 轮换；`low` 风险会话为 3 步，`medium/high/critical` 分别为 4/6/8 步。显式指定
-`challengeType` 或使用无障碍模式时保持单步；中间步骤不会签发令牌，最后一步通过后才签发。
+自动风险评分会综合 UA、Sec-CH-UA、平台/系统版本、系统语言、浏览器时区、用户选择语言、
+Cloudflare 国家、IP 频次与 UA 轮换；`low` 风险会话为 3 步，`medium/high/critical`
+分别为 4/6/8 步。显式指定 `challengeType` 时保持单步；无障碍模式会依据多选的无障碍
+理由组合多步骤图文/音频/基础验证。中间步骤不会签发令牌，最后一步通过后才签发。
 
 服务没有后台仪表盘，只暴露 Challenge、资源、嵌入页和 `siteverify` 接口。验证组件默认
 显示 hCaptcha 风格的固定高紧凑入口，点击后才请求挑战，并在当前层向上展开；验证完成后
@@ -66,7 +67,7 @@ python tests/browser_smoke.py
 
 成功后会向最近的 `form` 插入名为 `oxygen-token` 的隐藏字段，并触发
 `oxygenchallenge:verified` 事件。可通过 `challenge-type` 固定题型，通过
-`risk` 控制会话步数，通过 `accessible="true"` 强制单步反色无障碍模式。
+`risk` 控制会话步数。`accessible="true"` 会打开无障碍理由选择；只提供旧版参数时仍回退到单步反色模式。
 `oxygenchallenge:complete` 会与 `verified` 同步触发；完成态和宿主的验证回调在同一收起
 流程中处理。
 没有固定宽度时默认 400px，也可用 `width="360"` 等属性定制宽度；高度保持固定，
@@ -99,6 +100,14 @@ python tests/browser_smoke.py
 | `GET` | `/v1/challenges/:id/sequence.wav` | 动物声音序列 |
 | `POST` | `/v1/siteverify` | 服务端消费一次性令牌 |
 | `GET` | `/v1/meta` | API 与题型元信息 |
+| `GET` | `/v2/meta` | vNext API 与风险上下文元信息 |
+| `POST` | `/v2/challenges` | 创建带客户端上下文的 vNext Challenge |
+| `POST` | `/v2/challenges/:id/verify` | vNext 提交答案或交互证据 |
+| `POST` | `/v2/challenges/:id/swap` | vNext 换题或无障碍适配 |
+| `GET` | `/v2/challenges/:id/*` | v2 资源别名（SVG、WAV） |
+| `GET` | `/v2/animal-sounds/:animal.wav` | v2 动物声音试听别名 |
+| `POST` | `/v2/siteverify` | vNext 服务端消费一次性令牌 |
+| `POST` | `/v2/risk/assess` | 基于浏览器上下文评估风险 |
 | `GET` | `/healthz` | 健康检查 |
 | `GET` | `/platform` | OxygenAccount 开放平台 |
 | `GET` | `/docs` | 在线开发文档与接入示例 |
@@ -130,7 +139,10 @@ python tests/browser_smoke.py
 - 反色题正确答案不进入 HTML、DOM、JSON 或 SVG 文本节点。
 - 网格索引、序列、声音答案、计数结果、市场极值和计算结果只保存在服务端。
 - 公开预览不签发 token，也不携带风险会话 ID；风险题仍按 UA、设备类、网络和请求频次升级。
-- 无障碍按钮会实际切换到带 DTMF 音频的反色题，而不是无效刷新。
+- 无障碍按钮会要求选择至少一项、最多四项适配理由，并按可用感官组合多步骤挑战；
+  旧版 `accessible=true` 仍保留单题反色加 DTMF 的兼容路径。
+- 新 Web Component 默认使用 vNext 并上报时区、系统语言、用户选择语言、屏幕与能力信号；
+  客户可用 `api-version="1"` 显式回退旧版。
 - 摄像头题先加载手势模型并显示进度，再请求摄像头；CSP 明确允许受限 WASM 实例化。
 - 动物声音使用随机锚点动物，选项支持单声试听；语音题不再在文本中高亮检测词。
 - `siteverify` 令牌使用 Ed25519 签名，默认 120 秒有效并原子消费。

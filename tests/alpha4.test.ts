@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
+import { RISK_STEPS } from "../src/challenge.js";
 import { PlatformStore } from "../src/platform-store.js";
 import { clientIp, maxRisk, riskFromScore, RiskTracker } from "../src/risk.js";
 import { createSpeechWave, SPEECH_TEMPLATES, speechTakesValid } from "../src/speech.js";
@@ -324,19 +325,212 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.9" });
+      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0-alpha.10" });
 
       const mismatch = await built.app.inject({
         method: "POST",
         url: "/v1/challenges",
         headers: {
           origin: "https://app.test",
-          "x-oxygen-challenge-api-version": "2",
+          "x-oxygen-challenge-api-version": "3",
         },
         payload: { siteKey: "site_test", action: "submit" },
       });
       expect(mismatch.statusCode).toBe(400);
       expect(mismatch.json()).toEqual({ error: "API_VERSION_MISMATCH" });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("requires vNext client context and exposes the v2 risk endpoint", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-v2-")),
+    });
+    try {
+      const meta = await built.app.inject({ method: "GET", url: "/v2/meta" });
+      expect(meta.statusCode).toBe(200);
+      expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("2");
+      expect(meta.json()).toMatchObject({
+        apiVersion: "2",
+        endpoints: {
+          challenge: "/v2/challenges",
+          riskAssess: "/v2/risk/assess",
+        },
+      });
+
+      const missing = await built.app.inject({
+        method: "POST",
+        url: "/v2/challenges",
+        headers: { origin: "https://app.test" },
+        payload: { siteKey: "site_test", action: "submit" },
+      });
+      expect(missing.statusCode).toBe(400);
+      expect(missing.json()).toMatchObject({ error: "CLIENT_CONTEXT_REQUIRED" });
+
+      const context = {
+        timezone: "America/New_York",
+        timezoneOffsetMinutes: 300,
+        systemLanguage: "en-US",
+        languages: ["en-US", "zh-CN"],
+        selectedLanguage: "zh-CN",
+        webdriver: true,
+        screen: { width: 1440, height: 900, pixelRatio: 1 },
+      };
+      const created = await built.app.inject({
+        method: "POST",
+        url: "/v2/challenges",
+        headers: {
+          origin: "https://app.test",
+          "cf-ipcountry": "US",
+        },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          challengeType: "human_check",
+          clientContext: context,
+        },
+      });
+      expect(created.statusCode).toBe(200);
+      expect(created.headers["x-oxygen-challenge-api-version"]).toBe("2");
+
+      const assessed = await built.app.inject({
+        method: "POST",
+        url: "/v2/risk/assess",
+        headers: {
+          origin: "https://app.test",
+          "cf-ipcountry": "US",
+        },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          clientContext: context,
+        },
+      });
+      expect(assessed.statusCode).toBe(200);
+      expect(assessed.json()).toMatchObject({
+        apiVersion: "2",
+        context: {
+          timezone: "America/New_York",
+          systemLanguage: "en-US",
+          selectedLanguage: "zh-CN",
+        },
+      });
+      expect(["high", "critical"]).toContain(assessed.json<{ risk: string }>().risk);
+      expect(assessed.json<{ reasons: string[] }>().reasons).toContain(
+        "webdriver-detected",
+      );
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("keeps v2 challenge asset URLs on the v2 API surface", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-v2-assets-")),
+    });
+    try {
+      const context = {
+        timezone: "Asia/Hong_Kong",
+        timezoneOffsetMinutes: -480,
+        systemLanguage: "zh-HK",
+        languages: ["zh-HK", "zh-CN", "en"],
+        selectedLanguage: "zh-CN",
+        screen: { width: 1440, height: 900, pixelRatio: 2 },
+      };
+      const created = await built.app.inject({
+        method: "POST",
+        url: "/v2/challenges",
+        headers: { origin: "https://app.test" },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          challengeType: "grid_select",
+          clientContext: context,
+        },
+      });
+      expect(created.statusCode).toBe(200);
+      const challenge = created.json<{
+        challengeId: string;
+        targetUrl: string;
+        tileUrls: string[];
+      }>();
+      expect(challenge.targetUrl).toContain(
+        `/v2/challenges/${challenge.challengeId}/target.svg`,
+      );
+      expect(challenge.tileUrls).toHaveLength(9);
+      for (const tileUrl of challenge.tileUrls) {
+        expect(tileUrl).toContain(
+          `/v2/challenges/${challenge.challengeId}/tile/`,
+        );
+      }
+
+      const targetPath = new URL(challenge.targetUrl).pathname;
+      const target = await built.app.inject({
+        method: "GET",
+        url: targetPath,
+      });
+      expect(target.statusCode).toBe(200);
+      expect(target.headers["content-type"]).toContain("image/svg+xml");
+
+      const tilePath = new URL(challenge.tileUrls[0] ?? "").pathname;
+      const tile = await built.app.inject({ method: "GET", url: tilePath });
+      expect(tile.statusCode).toBe(200);
+      expect(tile.headers["content-type"]).toContain("image/svg+xml");
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("builds multi-step accessible sessions from selected sensory needs", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-a11y-")),
+    });
+    try {
+      const response = await built.app.inject({
+        method: "POST",
+        url: "/v1/challenges",
+        headers: { origin: "https://app.test" },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          accessible: true,
+          accessibilityNeeds: ["vision", "speech"],
+          risk: "high",
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json<{
+        type: ChallengeType;
+        totalSteps: number;
+      }>();
+      expect(body.totalSteps).toBe(RISK_STEPS.high);
+      expect([
+        "human_check",
+        "turnstile",
+        "semantic_pick",
+        "speech_wave",
+        "audio_sequence",
+      ]).toContain(body.type);
+
+      const allNeeds = await built.app.inject({
+        method: "POST",
+        url: "/v1/challenges",
+        headers: { origin: "https://app.test" },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          accessible: true,
+          accessibilityNeeds: ["vision", "motor", "hearing", "speech", "cognitive"],
+        },
+      });
+      expect(allNeeds.statusCode).toBe(400);
     } finally {
       await built.app.close();
     }
@@ -613,7 +807,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       }
       const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
       expect(openapi.statusCode).toBe(200);
-      expect(openapi.body).toContain("version: 26.0.0-alpha.9");
+      expect(openapi.body).toContain("version: 26.0.0-alpha.10");
     } finally {
       await built.app.close();
     }

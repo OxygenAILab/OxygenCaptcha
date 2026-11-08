@@ -67,7 +67,7 @@ function pageIndex(origin: string): string {
   return `
     <section class="doc-hero doc-hero-secondary">
       <div class="doc-hero-copy">
-        <p class="doc-kicker"><span class="zh">API v1</span><span class="en">API v1</span></p>
+        <p class="doc-kicker"><span class="zh">API v1 + vNext</span><span class="en">API v1 + vNext</span></p>
         <h2><span class="zh">在几分钟内接入验证</span><span class="en">Add verification in minutes</span></h2>
         <p>
           <span class="zh">OxygenChallenge 同时提供浏览器组件与服务端 JSON API。浏览器负责一次交互，业务后端只需要消费一次性令牌。</span>
@@ -103,6 +103,8 @@ function pageIndex(origin: string): string {
       </div>
       <div class="endpoint-table">
         <div><code>POST /v1/challenges</code><span><span class="zh">创建挑战或风险会话</span><span class="en">Create a challenge or risk session</span></span></div>
+        <div><code>POST /v2/challenges</code><span><span class="zh">带时区、系统语言与用户选择语言的 vNext 会话</span><span class="en">vNext session with timezone, system language, and user-selected language</span></span></div>
+        <div><code>POST /v2/risk/assess</code><span><span class="zh">在创建挑战前评估风险</span><span class="en">Assess risk before creating a challenge</span></span></div>
         <div><code>POST /v1/challenges/:id/verify</code><span><span class="zh">提交交互证据</span><span class="en">Submit interaction evidence</span></span></div>
         <div><code>POST /v1/siteverify</code><span><span class="zh">消费一次性验证令牌</span><span class="en">Consume a one-time verification token</span></span></div>
         <div><code>GET /embed</code><span><span class="zh">服务端渲染嵌入式验证</span><span class="en">Server-rendered embeddable verification</span></span></div>
@@ -150,7 +152,9 @@ function pageEmbed(origin: string): string {
         <div><code>risk</code><span><span class="zh"><code>low/medium/high/critical</code>，默认 3/4/6/8 步。</span><span class="en"><code>low/medium/high/critical</code>, mapping to 3/4/6/8 steps.</span></span></div>
         <div><code>steps</code><span><span class="zh">1 到 8 的自定义题数，主要用于验收。</span><span class="en">Custom step count from 1 to 8, mainly for acceptance tests.</span></span></div>
         <div><code>challenge-type</code><span><span class="zh">固定题型，仅用于开发与测试。</span><span class="en">Pin a challenge type for development and testing only.</span></span></div>
-        <div><code>accessible</code><span><span class="zh">设为 <code>true</code> 时切换到反色与听觉替代。</span><span class="en">Set to <code>true</code> to use inverse-color and audio alternatives.</span></span></div>
+        <div><code>accessible</code><span><span class="zh">设为 <code>true</code> 时保留兼容替代；入口面板会收集至少一项、最多四项适配理由。</span><span class="en">Set to <code>true</code> for the compatibility alternative; the entry panel collects one to four accessibility reasons.</span></span></div>
+        <div><code>api-version</code><span><span class="zh">默认 <code>2</code>，上报 vNext 客户端上下文；设为 <code>1</code> 回退旧版。</span><span class="en">Defaults to <code>2</code> and reports vNext context; set <code>1</code> for legacy.</span></span></div>
+        <div><code>user-language</code><span><span class="zh">消费端用户选择的界面语言，不是浏览器默认语言。</span><span class="en">Customer-selected interface language, not the browser default.</span></span></div>
         <div><code>name</code><span><span class="zh">隐藏字段名，默认 <code>oxygen-token</code>。</span><span class="en">Hidden input name, defaults to <code>oxygen-token</code>.</span></span></div>
       </div>
     </section>
@@ -204,6 +208,27 @@ frame-src ${base};</code></pre>
 function pageIntegration(origin: string): string {
   const base = escapeHtml(origin);
   return `
+    <section class="doc-section">
+      <div class="doc-section-head">
+        <h2><span class="zh">vNext 风险上下文</span><span class="en">vNext risk context</span></h2>
+        <p><span class="zh">API vNext 要求创建挑战时提供 <code>clientContext</code>，并建议消费端传入用户实际选择的语言。Web Component 默认自动收集。</span><span class="en">API vNext requires <code>clientContext</code> when creating a challenge and expects the customer-selected user language. The Web Component collects it by default.</span></p>
+      </div>
+      <pre><code>{
+  "siteKey": "oc_your_site_key",
+  "action": "signup",
+  "clientContext": {
+    "timezone": "Asia/Shanghai",
+    "timezoneOffsetMinutes": -480,
+    "systemLanguage": "zh-CN",
+    "languages": ["zh-CN", "en-US"],
+    "selectedLanguage": "zh-CN",
+    "hardwareConcurrency": 8,
+    "webdriver": false,
+    "screen": { "width": 1440, "height": 900, "pixelRatio": 1.25 }
+  }
+}</code></pre>
+      <p class="doc-note"><span class="zh">可以调用 <code>POST /v2/risk/assess</code> 先获得风险等级与建议步数；详细字段见 <code>/openapi.yaml</code>。</span><span class="en">Call <code>POST /v2/risk/assess</code> to obtain a risk level and recommended step count before creating the challenge.</span></p>
+    </section>
     <section class="doc-section">
       <div class="doc-section-head">
         <h2><span class="zh">消费令牌</span><span class="en">Consume the token</span></h2>

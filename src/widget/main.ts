@@ -10,6 +10,39 @@ function scriptOrigin(): string {
 
 const SOURCE_ORIGIN = scriptOrigin();
 
+function collectClientContext(selectedLanguage: string): Record<string, unknown> {
+  const navigatorWithHints = navigator as Navigator & {
+    deviceMemory?: number;
+    webdriver?: boolean;
+  };
+  const colorScheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : window.matchMedia("(prefers-color-scheme: light)").matches
+      ? "light"
+      : "no-preference";
+  return {
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/Unknown",
+    timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+    systemLanguage: navigator.language || "und",
+    languages: Array.from(navigator.languages ?? []).slice(0, 12),
+    selectedLanguage: selectedLanguage || undefined,
+    platform: navigator.platform || undefined,
+    hardwareConcurrency: navigator.hardwareConcurrency || undefined,
+    deviceMemory: navigatorWithHints.deviceMemory,
+    touchPoints: navigator.maxTouchPoints,
+    colorScheme,
+    reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    webdriver: navigatorWithHints.webdriver === true,
+    cookiesEnabled: navigator.cookieEnabled,
+    screen: {
+      width: screen.width,
+      height: screen.height,
+      pixelRatio: window.devicePixelRatio || 1,
+      colorDepth: screen.colorDepth,
+    },
+  };
+}
+
 function inlineWidgetStyle(): string {
   return [
     ":host{position:relative;z-index:2147483000;display:block;width:var(--oc-width,400px);max-width:100%;height:96px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
@@ -20,7 +53,7 @@ function inlineWidgetStyle(): string {
     ".oc-success-check{display:grid;place-items:center;width:29px;height:29px;border-radius:4px;background:#168454}",
     ".oc-success-check::after{content:'';width:7px;height:14px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg) translate(-1px,-1px)}",
     ".oc-success-label{color:#12633f;font-size:15px;font-weight:700;line-height:1.3}",
-    ".oc-success-mark{display:block;width:30px;height:30px;object-fit:contain;justify-self:end}",
+    ".oc-success-mark{display:block;width:30px;height:30px;justify-self:end;color:#111}",
     ".oc-success-brand{display:flex;align-items:center;justify-content:center;min-height:24px;padding-top:4px;color:#6e7a8c;font-size:11px;font-weight:650;text-align:center}",
     ".oc-error{padding:16px;border:1px solid rgba(127,29,29,.35);border-radius:8px;color:#7f1d1d;background:#fef2f2;font:14px/1.5 system-ui,sans-serif}",
   ].join("");
@@ -111,7 +144,10 @@ class OxygenChallengeElement extends HTMLElement {
         <div class="oc-success-bar">
           <span class="oc-success-check" aria-hidden="true"></span>
           <span class="oc-success-label">验证通过</span>
-          <img class="oc-success-mark" src="${this.sourceOrigin}/oxygenmark.png" alt="Oxygen">
+          <svg class="oc-success-mark" viewBox="0 0 64 64" role="img" aria-label="Oxygen">
+            <circle cx="30" cy="35" r="23" fill="none" stroke="currentColor" stroke-width="6"></circle>
+            <circle cx="38" cy="29" r="18" fill="none" stroke="currentColor" stroke-width="6"></circle>
+          </svg>
         </div>
         <div class="oc-success-brand">Oxygen Challenge</div>
       </div>`;
@@ -137,10 +173,20 @@ class OxygenChallengeElement extends HTMLElement {
     const accessible = this.getAttribute("accessible");
     const risk = this.getAttribute("risk");
     const steps = this.getAttribute("steps");
+    const apiVersion = this.getAttribute("api-version") === "1" ? "1" : "2";
+    const selectedLanguage =
+      this.getAttribute("user-language") ?? document.documentElement.lang;
     const url = new URL("/embed", this.sourceOrigin);
     url.searchParams.set("sitekey", siteKey);
     url.searchParams.set("action", action);
     url.searchParams.set("parentOrigin", location.origin);
+    url.searchParams.set("apiVersion", apiVersion);
+    if (apiVersion === "2") {
+      url.searchParams.set(
+        "clientContext",
+        JSON.stringify(collectClientContext(selectedLanguage)),
+      );
+    }
     if (
       challengeType &&
       [
@@ -176,7 +222,7 @@ class OxygenChallengeElement extends HTMLElement {
   }
 
   private onMessage = (event: MessageEvent): void => {
-    if (event.origin !== this.sourceOrigin || event.source !== this.frame?.contentWindow) {
+    if (event.origin !== this.sourceOrigin || !this.frame) {
       return;
     }
     const data = event.data as {

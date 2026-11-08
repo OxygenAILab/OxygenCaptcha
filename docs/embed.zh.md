@@ -41,7 +41,9 @@
 | `challenge-type` | 否 | 随机 | 固定题型，见 API 文档 |
 | `risk` | 否 | `low` | `low/medium/high/critical`，对应 3/4/6/8 步 |
 | `steps` | 否 | 风险默认 | 自定义 1 到 8 步，主要用于验收 |
-| `accessible` | 否 | `false` | 设为 `true` 强制反色无障碍模式 |
+| `accessible` | 否 | `false` | 设为 `true` 进入无障碍流程；配合 `accessibilityNeeds` 组合多步骤题型 |
+| `api-version` | 否 | `2` | `2` 上报时区/语言/屏幕等风险上下文；`1` 回退旧版 |
+| `user-language` | 否 | 页面 `lang` | 消费端用户选择的语言，用于 vNext 风险比较 |
 
 管理员和自动化验收可以固定题型：
 
@@ -130,6 +132,9 @@ document.querySelector("oxygen-challenge").reset();
 | `risk` | 可选，`low/medium/high/critical` |
 | `steps` | 可选，1 到 8 |
 | `accessible` | `0` 或 `1` |
+| `apiVersion` | `1` 或 `2`；`2` 需要 `clientContext` |
+| `clientContext` | URL 编码后的 JSON；Web Component 自动生成 |
+| `accessibilityNeeds` | 逗号分隔的适配理由，最多四项 |
 | `launch` | `0` 默认显示紧凑入口；`1` 直接创建并显示 Challenge |
 | `session` | 服务器生成的会话续页，不应由客户页面自行构造 |
 
@@ -154,7 +159,9 @@ Challenge 页自身允许 MediaPipe 所需的 `'wasm-unsafe-eval'`，客户页�
 - 所有交互控件触控目标不小于 44px。
 - 默认入口为 400×96px 的品牌化矩形，点击热区保持 44px，可见方框为 29px。
 - 图标、刷新和无障碍按钮都有可访问名称与键盘焦点态。
-- 题内无障碍入口使用图标按钮并带 `aria-label`，会实际切换到反色题和 DTMF 音频。
+- 紧凑入口的无障碍按钮会显示可多选的理由面板；至少选择一项、最多四项，不能全选。
+  理由用于选择可用感官匹配的多步骤题型，而不是固定返回同一道题。
+- 旧版 `accessible=1` 且不提供理由时，仍兼容单步反色题和 DTMF 音频。
 - 风险会话只有在最后一步通过后才写入隐藏 token 字段。
 - 声音题只在用户点击“播放声音”后请求和播放 WAV。
 - 序列记忆只播放一次随机顺序；用户需要主动点击“播放序列”。

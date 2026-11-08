@@ -13,6 +13,7 @@ import {
 import { createMotion, validMotionPoint } from "./motion.js";
 import { createSpeechWave, SPEECH_TEMPLATES, speechTakesValid } from "./speech.js";
 import type {
+  AccessibilityNeed,
   AppConfig,
   AudioSequenceState,
   ChallengeEvidence,
@@ -272,10 +273,16 @@ export class ChallengeStore {
     deviceClass: DeviceClass = "desktop",
     preview = false,
     bypass = false,
+    accessibilityNeeds: AccessibilityNeed[] = [],
   ): ChallengeState {
     this.cleanup();
 
-    const totalSteps = bypass || preview || accessible || requestedType
+    const hasAccessibilityNeeds = accessible && accessibilityNeeds.length > 0;
+    const totalSteps =
+      bypass ||
+      preview ||
+      (accessible && !hasAccessibilityNeeds) ||
+      (requestedType && !hasAccessibilityNeeds)
       ? 1
       : (requestedSteps ?? RISK_STEPS[risk]);
     const sessionId = randomBytes(18).toString("base64url");
@@ -289,8 +296,12 @@ export class ChallengeStore {
       ? (["human_check"] as ChallengeType[])
       : chooseTypes(
           totalSteps,
-          this.availableTypes(deviceClass),
-          accessible ? "inverse_occlusion" : explicitType,
+          this.availableTypes(deviceClass, accessibilityNeeds),
+          hasAccessibilityNeeds
+            ? undefined
+            : accessible
+              ? "inverse_occlusion"
+              : explicitType,
         );
     const session: ChallengeSessionState = {
       id: sessionId,
@@ -307,6 +318,7 @@ export class ChallengeStore {
       completed: false,
       testMode,
       bypass,
+      accessibilityNeeds,
       deviceClass,
       swapsRemaining: deviceClass === "desktop" ? 1 : 0,
     };
@@ -327,6 +339,7 @@ export class ChallengeStore {
         deviceClass,
         preview,
         bypass,
+        accessibilityNeeds,
       });
       this.challenges.set(state.id, state);
       session.challengeIds.push(state.id);
@@ -367,7 +380,11 @@ export class ChallengeStore {
     return state;
   }
 
-  swap(id: string, accessible = false): SwapResult {
+  swap(
+    id: string,
+    accessible = false,
+    accessibilityNeeds: AccessibilityNeed[] = [],
+  ): SwapResult {
     const state = this.challenges.get(id);
     if (!state || state.used || state.expiresAt <= Date.now()) {
       return {
@@ -419,11 +436,13 @@ export class ChallengeStore {
       };
     }
     const deviceClass = state.deviceClass ?? "desktop";
-    const available = this.availableTypes(deviceClass).filter(
+    const available = this.availableTypes(deviceClass, accessibilityNeeds).filter(
       (type) => type !== state.type,
     );
     const nextType = accessible
-      ? "inverse_occlusion"
+      ? accessibilityNeeds.length > 0
+        ? chooseTypes(1, available)[0] ?? "human_check"
+        : "inverse_occlusion"
       : chooseTypes(1, available)[0] ?? state.type;
     const replacement = this.createState({
       siteKey: state.siteKey,
@@ -439,12 +458,18 @@ export class ChallengeStore {
       expiresAt: state.expiresAt,
       deviceClass,
       preview: false,
+      accessibilityNeeds:
+        accessible && accessibilityNeeds.length > 0
+          ? accessibilityNeeds
+          : (state.accessibilityNeeds ?? []),
     });
     this.challenges.delete(id);
     this.challenges.set(replacement.id, replacement);
     session.challengeIds[session.currentStep] = replacement.id;
     if (!accessible) {
       session.swapsRemaining -= 1;
+    } else if (accessibilityNeeds.length > 0) {
+      session.accessibilityNeeds = accessibilityNeeds;
     }
     return { kind: "swapped", state: replacement, sessionId: session.id };
   }
@@ -663,12 +688,24 @@ export class ChallengeStore {
     return this.challenges.size;
   }
 
-  private availableTypes(deviceClass: DeviceClass): ChallengeType[] {
+  private availableTypes(
+    deviceClass: DeviceClass,
+    accessibilityNeeds: AccessibilityNeed[] = [],
+  ): ChallengeType[] {
     return CHALLENGE_TYPES.filter(
       (type) =>
         (type !== "turnstile" ||
           Boolean(this.config.turnstileSiteKey && this.config.turnstileSecretKey)) &&
-        (deviceClass !== "mobile" || type !== "key_pointer"),
+        (deviceClass !== "mobile" || type !== "key_pointer") &&
+        (!accessibilityNeeds.includes("vision") ||
+          ["human_check", "turnstile", "audio_sequence", "semantic_pick", "speech_wave"].includes(type)) &&
+        (!accessibilityNeeds.includes("motor") ||
+          !["motion_drag", "key_pointer", "market_trade", "hand_motion"].includes(type)) &&
+        (!accessibilityNeeds.includes("hearing") ||
+          !["audio_sequence", "speech_wave"].includes(type)) &&
+        (!accessibilityNeeds.includes("speech") || type !== "speech_wave") &&
+        (!accessibilityNeeds.includes("cognitive") ||
+          !["calculation", "pattern_memory", "market_trade", "speech_wave", "count_flash"].includes(type)),
     );
   }
 
@@ -687,6 +724,7 @@ export class ChallengeStore {
     deviceClass: DeviceClass;
     preview: boolean;
     bypass?: boolean;
+    accessibilityNeeds?: AccessibilityNeed[];
   }): ChallengeState {
     const common = {
       id: randomBytes(18).toString("base64url"),
@@ -706,6 +744,9 @@ export class ChallengeStore {
       deviceClass: input.deviceClass,
       preview: input.preview,
       ...(input.bypass ? { bypass: true } : {}),
+      ...(input.accessibilityNeeds?.length
+        ? { accessibilityNeeds: input.accessibilityNeeds }
+        : {}),
       swapAllowed:
         input.preview ||
         (input.deviceClass === "desktop" &&

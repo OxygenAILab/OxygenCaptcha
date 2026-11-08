@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import type { RiskLevel } from "./types.js";
+import type { ClientContext, RiskLevel } from "./types.js";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -103,10 +103,81 @@ function systemDescription(userAgent: string): string {
   return "unknown";
 }
 
+function validTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function timezoneOffsetMinutesEast(value: string, at = Date.now()): number | undefined {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: value,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(at));
+    const part = (type: Intl.DateTimeFormatPartTypes): number => {
+      const raw = parts.find((entry) => entry.type === type)?.value;
+      return raw ? Number.parseInt(raw, 10) : Number.NaN;
+    };
+    const year = part("year");
+    const month = part("month");
+    const day = part("day");
+    const hour = part("hour");
+    const minute = part("minute");
+    const second = part("second");
+    if (![year, month, day, hour, minute, second].every(Number.isFinite)) {
+      return undefined;
+    }
+    const actual = new Date(at);
+    const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+    const actualAsUtc = Date.UTC(
+      actual.getUTCFullYear(),
+      actual.getUTCMonth(),
+      actual.getUTCDate(),
+      actual.getUTCHours(),
+      actual.getUTCMinutes(),
+      actual.getUTCSeconds(),
+    );
+    return Math.round((wallAsUtc - actualAsUtc) / 60_000);
+  } catch {
+    return undefined;
+  }
+}
+
+const COUNTRY_TIMEZONE_AREA: Record<string, string> = {
+  AU: "Australia",
+  CA: "America",
+  CN: "Asia",
+  DE: "Europe",
+  FR: "Europe",
+  GB: "Europe",
+  HK: "Asia",
+  JP: "Asia",
+  KR: "Asia",
+  MO: "Asia",
+  SG: "Asia",
+  TW: "Asia",
+  US: "America",
+};
+
 export class RiskTracker {
   private readonly records = new Map<string, RiskRecord>();
 
-  assess(request: RiskRequest, production: boolean, requested?: RiskLevel): RiskAssessment {
+  assess(
+    request: RiskRequest,
+    production: boolean,
+    requested?: RiskLevel,
+    clientContext?: ClientContext,
+  ): RiskAssessment {
     const now = Date.now();
     this.cleanup(now);
     const ip = clientIp(request);
@@ -183,6 +254,110 @@ export class RiskTracker {
     if (country && language && /^zh/i.test(country) && !/^zh/i.test(language)) {
       score += 3;
       reasons.push("country-language-weak-mismatch");
+    }
+
+    if (clientContext) {
+      if (clientContext.webdriver) {
+        score += 65;
+        reasons.push("webdriver-detected");
+      }
+      if (!validTimezone(clientContext.timezone)) {
+        score += 10;
+        reasons.push("invalid-timezone");
+      } else if (
+        /^UTC$|^Etc\/UTC$|^Etc\/Unknown$/i.test(clientContext.timezone)
+      ) {
+        score += 4;
+        reasons.push("generic-timezone");
+      }
+      const expectedArea = country ? COUNTRY_TIMEZONE_AREA[country] : undefined;
+      const timezoneArea = clientContext.timezone.split("/")[0];
+      if (expectedArea && timezoneArea && timezoneArea !== expectedArea) {
+        score += 5;
+        reasons.push("country-timezone-mismatch");
+      }
+      if (!clientContext.systemLanguage) {
+        score += 8;
+        reasons.push("missing-system-language");
+      }
+      if (!clientContext.languages?.length) {
+        score += 3;
+        reasons.push("missing-language-list");
+      }
+      const selectedLanguage = clientContext.selectedLanguage?.toLowerCase();
+      const systemLanguage = clientContext.systemLanguage?.toLowerCase();
+      if (
+        selectedLanguage &&
+        systemLanguage &&
+        selectedLanguage.split("-")[0] !== systemLanguage.split("-")[0] &&
+        !clientContext.languages?.some(
+          (candidate) =>
+            candidate.toLowerCase().split("-")[0] === selectedLanguage.split("-")[0],
+        )
+      ) {
+        score += 5;
+        reasons.push("selected-language-mismatch");
+      }
+      if ((clientContext.languages?.length ?? 0) > 8) {
+        score += 5;
+        reasons.push("excessive-language-list");
+      }
+      const observedOffset = validTimezone(clientContext.timezone)
+        ? timezoneOffsetMinutesEast(clientContext.timezone)
+        : undefined;
+      if (
+        observedOffset !== undefined &&
+        Math.abs(observedOffset + clientContext.timezoneOffsetMinutes) > 30
+      ) {
+        score += 6;
+        reasons.push("timezone-offset-mismatch");
+      }
+      const platform = clientContext.platform?.toLowerCase() ?? "";
+      if (
+        platform &&
+        ((platform.includes("win") && !/windows/i.test(userAgent)) ||
+          (platform.includes("android") && !/android/i.test(userAgent)) ||
+          ((platform.includes("iphone") || platform.includes("ipad")) &&
+            !/iphone|ipad|ios/i.test(userAgent)))
+      ) {
+        score += 5;
+        reasons.push("client-platform-mismatch");
+      }
+      if (clientContext.cookiesEnabled === false) {
+        score += 2;
+        reasons.push("cookies-disabled");
+      }
+      if (
+        clientContext.screen &&
+        (clientContext.screen.width <= 0 ||
+          clientContext.screen.height <= 0 ||
+          clientContext.screen.width > 16_384 ||
+          clientContext.screen.height > 16_384 ||
+          clientContext.screen.pixelRatio <= 0 ||
+          clientContext.screen.pixelRatio > 8)
+      ) {
+        score += 7;
+        reasons.push("implausible-screen");
+      }
+      if (
+        clientContext.hardwareConcurrency !== undefined &&
+        (clientContext.hardwareConcurrency <= 0 ||
+          clientContext.hardwareConcurrency > 128)
+      ) {
+        score += 6;
+        reasons.push("implausible-hardware");
+      }
+      if (
+        clientContext.deviceMemory !== undefined &&
+        (clientContext.deviceMemory <= 0 || clientContext.deviceMemory > 128)
+      ) {
+        score += 5;
+        reasons.push("implausible-device-memory");
+      }
+      if ((clientContext.touchPoints ?? 0) > 16) {
+        score += 4;
+        reasons.push("implausible-touch-points");
+      }
     }
 
     if (now - record.lastSeen < 60_000) {

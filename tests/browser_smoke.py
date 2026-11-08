@@ -734,9 +734,28 @@ def run_media_checks(browser: Browser) -> None:
 
 def run_accessible_check(browser: Browser) -> None:
     page, errors = open_page(browser, {"width": 390, "height": 844})
-    page.goto(embed_url("grid_select", accessible=True), wait_until="networkidle")
-    assert page.locator("body").get_attribute("data-challenge-type") == "inverse_occlusion"
-    assert page.locator("#oc-answer").is_visible()
+    page.goto(
+        f"{BASE}/embed?sitekey={SITE_KEY}&action=submit&parentOrigin={BASE}&challengeType=grid_select",
+        wait_until="networkidle",
+    )
+    page.locator("#oc-entry-accessibility").click()
+    panel = page.locator("#oc-accessibility-panel")
+    panel.wait_for(state="visible")
+    assert page.locator("#oc-accessibility-start").is_disabled()
+    checkboxes = panel.locator("input[type=checkbox]")
+    checkboxes.nth(0).check()
+    checkboxes.nth(3).check()
+    assert page.locator("#oc-accessibility-start").is_enabled()
+    checkboxes.nth(1).check()
+    checkboxes.nth(2).check()
+    checkboxes.nth(4).check()
+    assert page.locator("#oc-accessibility-start").is_disabled()
+    checkboxes.nth(4).uncheck()
+    page.locator("#oc-accessibility-start").click()
+    page.locator("#oc-form").wait_for(timeout=10_000)
+    assert page.locator("body").get_attribute("data-challenge-type") != "inverse_occlusion"
+    total_steps = page.locator(".oc-progress").inner_text().strip().split("/")[1]
+    assert int(total_steps) >= 3
     assert_no_overflow(page)
     assert not errors, errors
 

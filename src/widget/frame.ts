@@ -84,6 +84,8 @@ declare global {
 const form = document.querySelector<HTMLFormElement>("#oc-form");
 const shell = document.querySelector<HTMLElement>(".oc-shell");
 const body = document.body;
+const challengeApiVersion = shell?.dataset.apiVersion === "2" ? "2" : "1";
+const challengeApiPrefix = `/v${challengeApiVersion}`;
 const input = document.querySelector<HTMLInputElement>("#oc-answer");
 const submit = document.querySelector<HTMLButtonElement>("#oc-submit");
 const refresh = document.querySelector<HTMLButtonElement>("#oc-refresh");
@@ -140,6 +142,23 @@ const entryCheck = document.querySelector<HTMLButtonElement>("#oc-entry-check");
 const entryLabel = document.querySelector<HTMLElement>("#oc-entry-label");
 const entryAccessibility = document.querySelector<HTMLButtonElement>(
   "#oc-entry-accessibility",
+);
+const accessibilityPanel = document.querySelector<HTMLElement>(
+  "#oc-accessibility-panel",
+);
+const accessibilityStart = document.querySelector<HTMLButtonElement>(
+  "#oc-accessibility-start",
+);
+const accessibilityCancel = document.querySelector<HTMLButtonElement>(
+  "#oc-accessibility-cancel",
+);
+const accessibilityHint = document.querySelector<HTMLElement>(
+  "#oc-accessibility-hint",
+);
+const accessibilityInputs = Array.from(
+  document.querySelectorAll<HTMLInputElement>(
+    "#oc-accessibility-panel input[type='checkbox']",
+  ),
 );
 const type = body.dataset.challengeType ?? "inverse_occlusion";
 const testMode = body.dataset.testMode === "1";
@@ -280,7 +299,7 @@ function scheduleSuccessState(callback?: () => void): void {
   }, 260);
 }
 
-function launchChallenge(accessible = false): void {
+function launchChallenge(accessible = false, accessibilityNeeds: string[] = []): void {
   if (launching) {
     return;
   }
@@ -289,10 +308,14 @@ function launchChallenge(accessible = false): void {
   if (entryLabel) {
     entryLabel.textContent = "正在验证…";
   }
+  post("resize", { height: 420, compact: false });
   const url = new URL(window.location.href);
   url.searchParams.set("launch", "1");
   if (accessible) {
     url.searchParams.set("accessible", "1");
+  }
+  if (accessibilityNeeds.length > 0) {
+    url.searchParams.set("accessibilityNeeds", accessibilityNeeds.join(","));
   }
   if (!url.searchParams.has("session") && shell?.dataset.sessionId) {
     url.searchParams.set("session", shell.dataset.sessionId);
@@ -304,7 +327,48 @@ function launchChallenge(accessible = false): void {
       url.searchParams.set("parentOrigin", shell.dataset.parentOrigin);
     }
   }
-  window.setTimeout(() => window.location.assign(url), 160);
+  window.setTimeout(() => window.location.assign(url), 80);
+}
+
+function selectedAccessibilityNeeds(): string[] {
+  return accessibilityInputs
+    .filter((input) => input.checked)
+    .map((input) => input.value);
+}
+
+function updateAccessibilityPicker(): void {
+  const needs = selectedAccessibilityNeeds();
+  if (accessibilityStart) {
+    accessibilityStart.disabled = needs.length === 0 || needs.length > 4;
+  }
+  if (accessibilityHint) {
+    accessibilityHint.textContent =
+      needs.length === 0
+        ? "请选择至少一项。"
+        : needs.length > 4
+          ? "最多选择四项。"
+          : "系统将只使用与你选择的能力相匹配的题型。";
+  }
+}
+
+function openAccessibilityPicker(): void {
+  if (!accessibilityPanel) {
+    launchChallenge(true);
+    return;
+  }
+  accessibilityInputs.forEach((input) => {
+    input.checked = false;
+  });
+  accessibilityPanel.classList.remove("hidden");
+  updateAccessibilityPicker();
+  reportHeight();
+  accessibilityInputs[0]?.focus();
+}
+
+function closeAccessibilityPicker(): void {
+  accessibilityPanel?.classList.add("hidden");
+  window.setTimeout(reportHeight, 0);
+  entryAccessibility?.focus();
 }
 
 function initEntry(): void {
@@ -313,7 +377,17 @@ function initEntry(): void {
   }
   appendIcon(entryAccessibility, Accessibility);
   entryCheck.addEventListener("click", () => launchChallenge(false));
-  entryAccessibility?.addEventListener("click", () => launchChallenge(true));
+  entryAccessibility?.addEventListener("click", openAccessibilityPicker);
+  accessibilityInputs.forEach((input) => {
+    input.addEventListener("change", updateAccessibilityPicker);
+  });
+  accessibilityCancel?.addEventListener("click", closeAccessibilityPicker);
+  accessibilityStart?.addEventListener("click", () => {
+    const needs = selectedAccessibilityNeeds();
+    if (needs.length > 0 && needs.length <= 4) {
+      launchChallenge(true, needs);
+    }
+  });
   if (bypassActive) {
     entryCheck.disabled = true;
     if (entryLabel) {
@@ -456,7 +530,7 @@ function initAudioSequence(): void {
         return;
       }
       play("click");
-      player.src = `/v1/animal-sounds/${encodeURIComponent(key)}.wav`;
+      player.src = `${challengeApiPrefix}/animal-sounds/${encodeURIComponent(key)}.wav`;
       setStatus("正在播放选项声音…");
       void player.play().catch(() => {
         setStatus("无法播放选项声音，请检查设备设置。", "error");
@@ -469,7 +543,7 @@ function initAudioSequence(): void {
       return;
     }
     play("click");
-    player.src = `/v1/challenges/${shell.dataset.challengeId}/sequence.wav`;
+    player.src = `${challengeApiPrefix}/challenges/${shell.dataset.challengeId}/sequence.wav`;
     setStatus("正在播放声音序列…");
     void player.play().catch(() => {
       setStatus("无法播放音频，请检查设备设置。", "error");
@@ -1836,7 +1910,7 @@ refresh?.addEventListener("click", async () => {
   setStatus("正在更换挑战…");
   try {
     const response = await fetch(
-      `/v1/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
+      `${challengeApiPrefix}/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1869,7 +1943,7 @@ audioButton?.addEventListener("click", () => {
   if (!player || !shell || !status) {
     return;
   }
-  player.src = `/v1/challenges/${shell.dataset.challengeId}/audio.wav`;
+  player.src = `${challengeApiPrefix}/challenges/${shell.dataset.challengeId}/audio.wav`;
   setStatus("正在播放听觉验证码…");
   void player.play().catch(() => {
     setStatus("无法播放音频，请检查设备设置。", "error");
@@ -1885,7 +1959,7 @@ accessibleButton?.addEventListener("click", async () => {
   accessibleButton.disabled = true;
   try {
     const response = await fetch(
-      `/v1/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
+      `${challengeApiPrefix}/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2027,7 +2101,7 @@ form?.addEventListener("submit", async (event) => {
   submit.disabled = true;
   setStatus("正在验证…");
   try {
-    const response = await fetch(`/v1/challenges/${shell.dataset.challengeId}/verify`, {
+    const response = await fetch(`${challengeApiPrefix}/challenges/${shell.dataset.challengeId}/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

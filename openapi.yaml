@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.0-alpha.9
-  description: Risk-aware CAPTCHA API with visual, motion, audio, calculation, camera, speech and Cloudflare Turnstile challenges.
+  version: 26.0.0-alpha.10
+  description: Risk-aware CAPTCHA API with v1 compatibility and vNext client-context risk assessment.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -10,6 +10,253 @@ servers:
   - url: https://captcha.oxygenai.top
 security: []
 paths:
+  /v2/meta:
+    get:
+      operationId: getV2Meta
+      summary: Get vNext API metadata
+      responses:
+        "200":
+          description: vNext metadata
+        "400":
+          description: Invalid API version header
+  /v2/risk/assess:
+    post:
+      operationId: assessV2Risk
+      summary: Assess request risk from browser and client context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RiskContextRequest"
+      responses:
+        "200":
+          description: Risk assessment
+        "400":
+          description: Invalid client context
+        "403":
+          description: Origin or action denied
+  /v2/challenges:
+    post:
+      operationId: createV2Challenge
+      summary: Create a vNext challenge with required client context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateV2ChallengeRequest"
+      responses:
+        "200":
+          description: Challenge created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeResponse"
+        "400":
+          description: Invalid request or missing client context
+        "403":
+          description: Origin or action denied
+  /v2/challenges/{id}/verify:
+    post:
+      operationId: verifyV2Challenge
+      summary: Verify a vNext challenge response
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChallengeEvidence"
+      responses:
+        "200":
+          description: Verification result, a step result, or a generic failure
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/VerificationReceipt"
+                  - $ref: "#/components/schemas/StepPassed"
+                  - $ref: "#/components/schemas/VerificationFailure"
+        "410":
+          description: Challenge expired or consumed
+  /v2/challenges/{id}/swap:
+    post:
+      operationId: swapV2Challenge
+      summary: Replace an eligible vNext challenge
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accessible:
+                  type: boolean
+                  default: false
+                accessibilityNeeds:
+                  type: array
+                  maxItems: 4
+                  items:
+                    type: string
+                    enum: [vision, motor, hearing, speech, cognitive]
+      responses:
+        "200":
+          description: Challenge replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [swapped, challengeId, type]
+                properties:
+                  swapped:
+                    type: boolean
+                  challengeId:
+                    type: string
+                  preview:
+                    type: boolean
+                  type:
+                    $ref: "#/components/schemas/ChallengeType"
+                  sessionId:
+                    type: string
+                  nextEmbedUrl:
+                    type: string
+                    format: uri
+        "403":
+          description: Replacement is not allowed for this device or challenge
+        "404":
+          description: Challenge not found
+  /v2/challenges/{id}/overlay.svg:
+    get:
+      operationId: getV2InverseOverlay
+      summary: Get the vNext inverse-occlusion digit SVG
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: SVG image
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "410":
+          description: Challenge expired or wrong type
+  /v2/challenges/{id}/audio.wav:
+    get:
+      operationId: getV2AccessibilityAudio
+      summary: Get the vNext DTMF accessibility audio
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: WAV audio
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Challenge expired or wrong type
+  /v2/challenges/{id}/target.svg:
+    get:
+      operationId: getV2GridTarget
+      summary: Get the vNext grid target SVG
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: SVG target image
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "410":
+          description: Challenge expired or wrong type
+  /v2/challenges/{id}/tile/{index}.svg:
+    get:
+      operationId: getV2GridTile
+      summary: Get a vNext grid tile SVG
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+        - in: path
+          name: index
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 8
+      responses:
+        "200":
+          description: SVG tile image
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "410":
+          description: Challenge expired or wrong type
+  /v2/challenges/{id}/sequence.wav:
+    get:
+      operationId: getV2AudioSequence
+      summary: Get the vNext synthesized animal sound sequence
+      parameters:
+        - $ref: "#/components/parameters/ChallengeId"
+      responses:
+        "200":
+          description: WAV sequence
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Challenge expired or wrong type
+  /v2/animal-sounds/{animal}.wav:
+    get:
+      operationId: getV2AnimalSoundPreview
+      summary: Get one vNext animal sound preview
+      parameters:
+        - in: path
+          name: animal
+          required: true
+          schema:
+            type: string
+            enum: [cat, dog, bird, monkey, horse, snake, bear, mouse, elephant, seal]
+      responses:
+        "200":
+          description: WAV clip
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Unknown animal
+  /v2/siteverify:
+    post:
+      operationId: siteverifyV2
+      summary: Consume a vNext verification token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [secret, response]
+              properties:
+                secret:
+                  type: string
+                response:
+                  type: string
+                action:
+                  type: string
+      responses:
+        "200":
+          description: Site verification result
+        "400":
+          description: Invalid request
   /v1/challenges:
     post:
       operationId: createChallenge
@@ -63,7 +310,7 @@ paths:
     post:
       operationId: swapChallenge
       summary: Replace an eligible camera, microphone, or Turnstile challenge
-      description: Desktop media challenges can be replaced once. Passing `accessible: true` requests the audio-enabled inverse-occlusion alternative.
+      description: "Desktop media challenges can be replaced once. Passing `accessible: true` requests the audio-enabled inverse-occlusion alternative."
       parameters:
         - $ref: "#/components/parameters/ChallengeId"
       requestBody:
@@ -282,6 +529,24 @@ paths:
           schema:
             type: string
             enum: ["0", "1"]
+        - in: query
+          name: apiVersion
+          required: false
+          schema:
+            type: string
+            enum: ["1", "2"]
+        - in: query
+          name: clientContext
+          required: false
+          description: JSON-encoded ClientContext. Required for API v2 embeds.
+          schema:
+            type: string
+        - in: query
+          name: accessibilityNeeds
+          required: false
+          description: Comma-separated accessibility needs.
+          schema:
+            type: string
       responses:
         "200":
           description: HTML widget
@@ -312,10 +577,10 @@ components:
       in: header
       name: X-Oxygen-Challenge-API-Version
       required: false
-      description: Optional version assertion. Use `1` or `v1`.
+      description: Optional version assertion. Use `1`/`v1` for the compatibility API or `2`/`v2` for vNext.
       schema:
         type: string
-        enum: ["1", "v1"]
+        enum: ["1", "v1", "2", "v2"]
     ChallengeId:
       in: path
       name: id
@@ -364,6 +629,89 @@ components:
           type: integer
           minimum: 1
           maximum: 8
+        accessibilityNeeds:
+          type: array
+          maxItems: 4
+          items:
+            type: string
+            enum: [vision, motor, hearing, speech, cognitive]
+        clientContext:
+          $ref: "#/components/schemas/ClientContext"
+    CreateV2ChallengeRequest:
+      allOf:
+        - $ref: "#/components/schemas/CreateChallengeRequest"
+        - type: object
+          required: [clientContext]
+          properties:
+            clientContext:
+              $ref: "#/components/schemas/ClientContext"
+    RiskContextRequest:
+      type: object
+      required: [siteKey, clientContext]
+      properties:
+        siteKey:
+          type: string
+        action:
+          type: string
+          default: submit
+        risk:
+          $ref: "#/components/schemas/RiskLevel"
+        clientContext:
+          $ref: "#/components/schemas/ClientContext"
+    ClientContext:
+      type: object
+      required: [timezone, timezoneOffsetMinutes, systemLanguage]
+      properties:
+        timezone:
+          type: string
+          example: Asia/Shanghai
+        timezoneOffsetMinutes:
+          type: integer
+          minimum: -840
+          maximum: 840
+          example: -480
+        systemLanguage:
+          type: string
+          example: zh-CN
+        languages:
+          type: array
+          maxItems: 12
+          items:
+            type: string
+        selectedLanguage:
+          type: string
+          example: zh-CN
+        platform:
+          type: string
+        hardwareConcurrency:
+          type: integer
+          minimum: 0
+        deviceMemory:
+          type: number
+          minimum: 0
+        touchPoints:
+          type: integer
+          minimum: 0
+        colorScheme:
+          type: string
+          enum: [light, dark, no-preference]
+        reducedMotion:
+          type: boolean
+        webdriver:
+          type: boolean
+        cookiesEnabled:
+          type: boolean
+        screen:
+          type: object
+          properties:
+            width:
+              type: number
+            height:
+              type: number
+            pixelRatio:
+              type: number
+            colorDepth:
+              type: integer
     ChallengeResponse:
       type: object
       required: [challengeId, type, siteKey, action, expiresAt, prompt, maxAttempts]

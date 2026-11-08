@@ -43,6 +43,34 @@ export type ChallengeType =
   | "speech_wave";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
+export type AccessibilityNeed =
+  | "vision"
+  | "motor"
+  | "hearing"
+  | "speech"
+  | "cognitive";
+
+export type ClientContext = {
+  timezone: string;
+  timezoneOffsetMinutes: number;
+  systemLanguage: string;
+  languages?: string[];
+  selectedLanguage?: string;
+  platform?: string;
+  hardwareConcurrency?: number;
+  deviceMemory?: number;
+  touchPoints?: number;
+  colorScheme?: "light" | "dark" | "no-preference";
+  reducedMotion?: boolean;
+  webdriver?: boolean;
+  cookiesEnabled?: boolean;
+  screen?: {
+    width: number;
+    height: number;
+    pixelRatio: number;
+    colorDepth?: number;
+  };
+};
 
 export type GridState = {
   itemKeys: string[];
@@ -255,6 +283,7 @@ export type ChallengeState = {
   risk?: RiskLevel;
   preview?: boolean;
   bypass?: boolean;
+  accessibilityNeeds?: AccessibilityNeed[];
   deviceClass?: DeviceClass;
   swapAllowed?: boolean;
   parentOrigin: string | null;
@@ -301,6 +330,7 @@ export type ChallengeSessionState = {
   completed: boolean;
   testMode: boolean;
   bypass: boolean;
+  accessibilityNeeds: AccessibilityNeed[];
   deviceClass: DeviceClass;
   swapsRemaining: number;
 };

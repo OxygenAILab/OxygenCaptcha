@@ -2,7 +2,11 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from "fastify";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -30,7 +34,13 @@ import {
   siteAllowsOrigin,
 } from "./site.js";
 import { TokenService } from "./token.js";
-import type { AppConfig, ChallengeState, HandMotionAction } from "./types.js";
+import type {
+  AccessibilityNeed,
+  AppConfig,
+  ChallengeState,
+  ClientContext,
+  HandMotionAction,
+} from "./types.js";
 import { officialSiteHtml } from "./web.js";
 import { verifyTurnstile } from "./turnstile.js";
 
@@ -53,9 +63,36 @@ const CHALLENGE_TYPES = [
 ] as const;
 
 const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
+const ACCESSIBILITY_NEEDS = ["vision", "motor", "hearing", "speech", "cognitive"] as const;
 const API_VERSION = "1";
-const APP_VERSION = "v26.0-alpha.9";
-const ASSET_VERSION = "26.0.0-alpha.9";
+const API_NEXT_VERSION = "2";
+const SUPPORTED_API_VERSIONS = [API_VERSION, API_NEXT_VERSION] as const;
+const APP_VERSION = "v26.0-alpha.10";
+const ASSET_VERSION = "26.0.0-alpha.10";
+
+const clientContextSchema = z.object({
+  timezone: z.string().trim().min(1).max(64),
+  timezoneOffsetMinutes: z.number().int().min(-840).max(840),
+  systemLanguage: z.string().trim().min(2).max(35),
+  languages: z.array(z.string().trim().min(2).max(35)).max(12).optional(),
+  selectedLanguage: z.string().trim().min(2).max(35).optional(),
+  platform: z.string().trim().max(128).optional(),
+  hardwareConcurrency: z.number().int().min(0).max(256).optional(),
+  deviceMemory: z.number().min(0).max(128).optional(),
+  touchPoints: z.number().int().min(0).max(32).optional(),
+  colorScheme: z.enum(["light", "dark", "no-preference"]).optional(),
+  reducedMotion: z.boolean().optional(),
+  webdriver: z.boolean().optional(),
+  cookiesEnabled: z.boolean().optional(),
+  screen: z
+    .object({
+      width: z.number().min(0).max(32_768),
+      height: z.number().min(0).max(32_768),
+      pixelRatio: z.number().min(0).max(16),
+      colorDepth: z.number().int().min(0).max(64).optional(),
+    })
+    .optional(),
+});
 
 const createSchema = z.object({
   siteKey: z.string().min(3).max(128),
@@ -64,6 +101,15 @@ const createSchema = z.object({
   challengeType: z.enum(CHALLENGE_TYPES).optional(),
   risk: z.enum(RISK_LEVELS).optional(),
   steps: z.number().int().min(1).max(8).optional(),
+  clientContext: clientContextSchema.optional(),
+  accessibilityNeeds: z.enum(ACCESSIBILITY_NEEDS).array().max(4).optional(),
+});
+
+const riskContextSchema = z.object({
+  siteKey: z.string().min(3).max(128),
+  action: z.string().min(1).max(64).default("submit"),
+  risk: z.enum(RISK_LEVELS).optional(),
+  clientContext: clientContextSchema,
 });
 
 const verifySchema = z.object({
@@ -135,12 +181,16 @@ const embedSchema = z.object({
   launch: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   accessible: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   test: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
+  apiVersion: z.enum(["1", "2"]).optional(),
+  clientContext: z.string().max(4_000).optional(),
+  accessibilityNeeds: z.string().max(128).optional(),
 }).refine((value) => Boolean(value.sitekey || value.session), {
   message: "sitekey or session is required",
 });
 
 const swapSchema = z.object({
   accessible: z.boolean().optional().default(false),
+  accessibilityNeeds: z.enum(ACCESSIBILITY_NEEDS).array().max(4).optional(),
 });
 
 const siteverifySchema = z.object({
@@ -159,8 +209,54 @@ function escapeHtml(value: string): string {
 }
 
 function apiVersionAllowed(request: FastifyRequest): boolean {
-  const requested = request.headers["x-oxygen-challenge-api-version"];
-  return requested === undefined || requested === API_VERSION || requested === `v${API_VERSION}`;
+  const rawRequested = request.headers["x-oxygen-challenge-api-version"];
+  const requested = Array.isArray(rawRequested) ? rawRequested[0] : rawRequested;
+  if (requested === undefined) {
+    return true;
+  }
+  const normalized = requested.startsWith("v") ? requested.slice(1) : requested;
+  return SUPPORTED_API_VERSIONS.includes(normalized as (typeof SUPPORTED_API_VERSIONS)[number]);
+}
+
+function apiVersionForRequest(request: FastifyRequest): "1" | "2" {
+  if (request.url.startsWith("/v2/")) {
+    return "2";
+  }
+  const rawRequested = request.headers["x-oxygen-challenge-api-version"];
+  const requested = Array.isArray(rawRequested) ? rawRequested[0] : rawRequested;
+  if (requested === undefined) {
+    return "1";
+  }
+  const normalized = requested.startsWith("v") ? requested.slice(1) : requested;
+  return normalized === API_NEXT_VERSION ? "2" : "1";
+}
+
+function parseClientContext(value: string | undefined): ClientContext | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed = clientContextSchema.safeParse(JSON.parse(value));
+    return parsed.success ? (parsed.data as ClientContext) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseAccessibilityNeeds(value: string | undefined): AccessibilityNeed[] {
+  if (!value) {
+    return [];
+  }
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item): item is AccessibilityNeed =>
+          ACCESSIBILITY_NEEDS.includes(item as AccessibilityNeed),
+        ),
+    ),
+  ].slice(0, 4);
 }
 
 function deviceClassFor(request: FastifyRequest): "desktop" | "mobile" {
@@ -204,8 +300,13 @@ function defaultPublicDir(): string {
   return existsSync(built) ? built : colocated;
 }
 
-function serializeChallenge(state: ChallengeState, config: AppConfig): Record<string, unknown> {
+function serializeChallenge(
+  state: ChallengeState,
+  config: AppConfig,
+  apiVersion: "1" | "2" = "1",
+): Record<string, unknown> {
   const base = apiBase(config);
+  const assetPrefix = apiVersion === "2" ? "v2" : "v1";
   const common = {
     challengeId: state.id,
     type: state.type,
@@ -227,8 +328,8 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
       ...common,
       backgroundColor: state.backgroundColor,
       inverseColor: state.inverseColor,
-      overlayUrl: `${base}/v1/challenges/${state.id}/overlay.svg`,
-      audioUrl: `${base}/v1/challenges/${state.id}/audio.wav`,
+      overlayUrl: `${base}/${assetPrefix}/challenges/${state.id}/overlay.svg`,
+      audioUrl: `${base}/${assetPrefix}/challenges/${state.id}/audio.wav`,
       prompt: "输入图片中的六位数字",
       decoyText: state.decoyCode,
     };
@@ -239,9 +340,9 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
       ...common,
       prompt: `选择所有包含“${state.grid.targetName}”的图标`,
       targetName: state.grid.targetName,
-      targetUrl: `${base}/v1/challenges/${state.id}/target.svg`,
+      targetUrl: `${base}/${assetPrefix}/challenges/${state.id}/target.svg`,
       tileUrls: state.grid.itemKeys.map(
-        (_, index) => `${base}/v1/challenges/${state.id}/tile/${index}.svg`,
+        (_, index) => `${base}/${assetPrefix}/challenges/${state.id}/tile/${index}.svg`,
       ),
     };
   }
@@ -250,7 +351,7 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
     return {
       ...common,
       prompt: `听音频，选择${state.audioSequence.anchorLabel}之后的下一个声音`,
-      audioUrl: `${base}/v1/challenges/${state.id}/sequence.wav`,
+      audioUrl: `${base}/${assetPrefix}/challenges/${state.id}/sequence.wav`,
       options: state.audioSequence.options,
     };
   }
@@ -382,16 +483,21 @@ function serializeChallenge(state: ChallengeState, config: AppConfig): Record<st
   };
 }
 
-function challengeBody(state: ChallengeState, config: AppConfig): string {
+function challengeBody(
+  state: ChallengeState,
+  config: AppConfig,
+  apiVersion: "1" | "2" = "1",
+): string {
   const id = escapeHtml(state.id);
   const base = escapeHtml(apiBase(config));
+  const assetPrefix = apiVersion === "2" ? "v2" : "v1";
 
   if (state.type === "grid_select" && state.grid) {
     const tiles = state.grid.itemKeys
       .map(
         (_, index) => `
           <button class="oc-tile" type="button" data-index="${index}" aria-label="第 ${index + 1} 个图标" aria-pressed="false">
-            <img src="${base}/v1/challenges/${id}/tile/${index}.svg" alt="" draggable="false">
+            <img src="${base}/${assetPrefix}/challenges/${id}/tile/${index}.svg" alt="" draggable="false">
             <span class="oc-tile-check" aria-hidden="true"></span>
           </button>`,
       )
@@ -402,7 +508,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
           <p class="oc-kicker">请完成安全验证</p>
           <p class="oc-prompt" id="oc-prompt">选择所有包含“${escapeHtml(state.grid.targetName)}”的图标</p>
         </div>
-        <img class="oc-target-icon" src="${base}/v1/challenges/${id}/target.svg" alt="目标图标" draggable="false">
+        <img class="oc-target-icon" src="${base}/${assetPrefix}/challenges/${id}/target.svg" alt="目标图标" draggable="false">
       </div>
       <div class="oc-grid" id="oc-grid" role="group" aria-labelledby="oc-prompt">${tiles}</div>
       <div class="oc-controls oc-controls-end">
@@ -756,7 +862,7 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     </div>
     <div class="oc-image-wrap" style="--oc-bg:${backgroundColor};--oc-fg:${inverseColor}">
       <span class="oc-decoy" aria-hidden="true">${escapeHtml(state.decoyCode ?? "")}</span>
-      <img class="oc-image" src="${base}/v1/challenges/${id}/overlay.svg" alt="六位数字验证码" draggable="false" decoding="sync">
+      <img class="oc-image" src="${base}/${assetPrefix}/challenges/${id}/overlay.svg" alt="六位数字验证码" draggable="false" decoding="sync">
     </div>
     <div class="oc-controls">
       <label class="oc-field" for="oc-answer">
@@ -768,7 +874,12 @@ function challengeBody(state: ChallengeState, config: AppConfig): string {
     </div>`;
 }
 
-function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): string {
+function embedHtml(
+  state: ChallengeState,
+  config: AppConfig,
+  testMode = false,
+  apiVersion: "1" | "2" = "1",
+): string {
   const parentOrigin = state.parentOrigin ?? "";
   return `<!doctype html>
 <html lang="zh-CN">
@@ -781,7 +892,7 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
   <script defer src="${escapeHtml(apiBase(config))}/frame.js?v=${ASSET_VERSION}"></script>
 </head>
 <body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}" data-bypass="${state.bypass ? "1" : "0"}">
-  <main class="oc-shell" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}" data-preview="${state.preview ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}" data-swap-allowed="${state.swapAllowed ? "1" : "0"}">
+  <main class="oc-shell" data-api-version="${apiVersion}" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}" data-preview="${state.preview ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}" data-swap-allowed="${state.swapAllowed ? "1" : "0"}">
     <form class="oc-card" id="oc-form" novalidate>
       <header class="oc-header">
         <div class="oc-brand">
@@ -801,7 +912,7 @@ function embedHtml(state: ChallengeState, config: AppConfig, testMode = false): 
         </div>
       </header>
       <div class="oc-challenge">
-        ${challengeBody(state, config)}
+        ${challengeBody(state, config, apiVersion)}
       </div>
       <footer class="oc-footer">
         <div class="oc-legal">
@@ -862,6 +973,22 @@ function entryHtml(
         <span>Oxygen Challenge</span>
         <button class="oc-entry-accessibility" id="oc-entry-accessibility" type="button" aria-label="无障碍验证"><span class="oc-sr-only">无障碍验证</span></button>
       </div>
+      <section class="oc-accessibility-panel hidden" id="oc-accessibility-panel" role="dialog" aria-modal="true" aria-labelledby="oc-accessibility-title">
+        <h2 id="oc-accessibility-title">选择需要的验证方式</h2>
+        <p>可多选，至少选择一项，最多选择四项。系统只会使用与你可用感官相匹配的题型。</p>
+        <div class="oc-accessibility-options">
+          <label><input type="checkbox" value="vision"> 看不清图像或需要屏幕阅读器</label>
+          <label><input type="checkbox" value="motor"> 不便完成拖拽、精细点击或同时操作键盘鼠标</label>
+          <label><input type="checkbox" value="hearing"> 听不清声音或无法辨别音频</label>
+          <label><input type="checkbox" value="speech"> 不便朗读或说话</label>
+          <label><input type="checkbox" value="cognitive"> 需要更短、更简单的阅读或计算任务</label>
+        </div>
+        <p class="oc-accessibility-hint" id="oc-accessibility-hint">请选择至少一项。</p>
+        <div class="oc-accessibility-actions">
+          <button class="oc-text-button" type="button" id="oc-accessibility-cancel">取消</button>
+          <button class="oc-submit" type="button" id="oc-accessibility-start" disabled>开始适配验证</button>
+        </div>
+      </section>
     </section>
   </main>
 </body>
@@ -962,15 +1089,22 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   }
 
   app.addHook("onSend", async (request, reply, payload) => {
-    if (request.url.startsWith("/v1/")) {
-      reply.header("X-Oxygen-Challenge-API-Version", API_VERSION);
+    if (request.url.startsWith("/v1/") || request.url.startsWith("/v2/")) {
+      reply.header(
+        "X-Oxygen-Challenge-API-Version",
+        request.url.startsWith("/v2/") ? API_NEXT_VERSION : API_VERSION,
+      );
     }
     if (["/widget.js", "/widget.css", "/frame.js"].includes(request.url)) {
       reply.header("Cross-Origin-Resource-Policy", "cross-origin");
       reply.header("Access-Control-Allow-Origin", "*");
       reply.header("Access-Control-Allow-Private-Network", "true");
     }
-    if (request.url.startsWith("/v1/challenges") || request.url.startsWith("/embed")) {
+    if (
+      request.url.startsWith("/v1/challenges") ||
+      request.url.startsWith("/v2/challenges") ||
+      request.url.startsWith("/embed")
+    ) {
       reply.header("Cache-Control", "no-store, max-age=0");
       reply.header("Pragma", "no-cache");
     }
@@ -1040,24 +1174,94 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     return reply.code(404).send({ error: "OPENAPI_NOT_FOUND" });
   });
 
+  const metaFor = (apiVersion: string, prefix: "/v1" | "/v2") => ({
+    name: "OxygenChallenge",
+    version: APP_VERSION,
+    apiVersion,
+    supportedApiVersions: SUPPORTED_API_VERSIONS,
+    mode: "api-and-open-platform",
+    challengeTypes: CHALLENGE_TYPES,
+    riskLevels: RISK_STEPS,
+    clientContext: {
+      version: API_NEXT_VERSION,
+      requiredFor: ["/v2/challenges", "/v2/risk/assess"],
+      fields: [
+        "timezone",
+        "timezoneOffsetMinutes",
+        "systemLanguage",
+        "languages",
+        "selectedLanguage",
+        "platform",
+        "hardwareConcurrency",
+        "deviceMemory",
+        "touchPoints",
+        "colorScheme",
+        "reducedMotion",
+        "webdriver",
+        "cookiesEnabled",
+        "screen",
+      ],
+    },
+    endpoints: {
+      challenge: `${prefix}/challenges`,
+      challengeAssets: `${prefix}/challenges/:id/*`,
+      swap: `${prefix}/challenges/:id/swap`,
+      animalSounds: `${prefix}/animal-sounds/:animal.wav`,
+      siteverify: `${prefix}/siteverify`,
+      embed: "/embed",
+      riskAssess: "/v2/risk/assess",
+      jwks: "/.well-known/oxygenchallenge/jwks.json",
+      health: "/healthz",
+    },
+  });
+
   app.get("/v1/meta", async () => ({
-      name: "OxygenChallenge",
-      version: APP_VERSION,
-      apiVersion: API_VERSION,
-      mode: "api-and-open-platform",
-      challengeTypes: CHALLENGE_TYPES,
-      riskLevels: RISK_STEPS,
-      endpoints: {
-        challenge: "/v1/challenges",
-        challengeAssets: "/v1/challenges/:id/*",
-        swap: "/v1/challenges/:id/swap",
-        animalSounds: "/v1/animal-sounds/:animal.wav",
-        siteverify: "/v1/siteverify",
-        embed: "/embed",
-        jwks: "/.well-known/oxygenchallenge/jwks.json",
-        health: "/healthz",
-      },
+    ...metaFor(API_VERSION, "/v1"),
+    nextApiVersion: API_NEXT_VERSION,
   }));
+
+  app.get("/v2/meta", async () => metaFor(API_NEXT_VERSION, "/v2"));
+
+  app.post("/v2/risk/assess", async (request, reply) => {
+    const parsed = riskContextSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_RISK_CONTEXT",
+        issues: parsed.error.issues,
+      });
+    }
+    const clientContext = parsed.data.clientContext as ClientContext;
+    const site = getSite(config, parsed.data.siteKey);
+    if (!site) {
+      return reply.code(404).send({ error: "SITE_NOT_FOUND" });
+    }
+    if (!siteAllowsAction(site, parsed.data.action)) {
+      return reply.code(403).send({ error: "ACTION_NOT_ALLOWED" });
+    }
+    const origin = requestOrigin(request.headers.origin, request.headers.referer);
+    if (!siteAllowsOrigin(site, origin)) {
+      return reply.code(403).send({ error: "ORIGIN_NOT_ALLOWED" });
+    }
+    const assessment = riskTracker.assess(
+      { headers: request.headers, ip: request.ip },
+      config.nodeEnv === "production",
+      parsed.data.risk,
+      clientContext,
+    );
+    return {
+      apiVersion: API_NEXT_VERSION,
+      risk: assessment.level,
+      score: assessment.score,
+      recommendedSteps: RISK_STEPS[assessment.level],
+      reasons: assessment.reasons,
+      context: {
+        timezone: clientContext.timezone,
+        systemLanguage: clientContext.systemLanguage,
+        selectedLanguage: clientContext.selectedLanguage,
+      },
+      assessedAt: new Date().toISOString(),
+    };
+  });
 
   app.get("/captcha", async (request, reply) => {
     const site = config.sites[0];
@@ -1136,14 +1340,26 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
 
   app.get("/.well-known/oxygenchallenge/jwks.json", async () => tokens.jwks());
 
-  app.post("/v1/challenges", async (request, reply) => {
+  const createChallengeHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
     if (!apiVersionAllowed(request)) {
       return reply.code(400).send({ error: "API_VERSION_MISMATCH" });
     }
+    const apiVersion = apiVersionForRequest(request);
     const parsed = createSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "INVALID_REQUEST", issues: parsed.error.issues });
     }
+    if (apiVersion === "2" && !parsed.data.clientContext) {
+      return reply.code(400).send({
+        error: "CLIENT_CONTEXT_REQUIRED",
+        apiVersion,
+        requiredFields: ["timezone", "timezoneOffsetMinutes", "systemLanguage"],
+      });
+    }
+    const clientContext = parsed.data.clientContext as ClientContext | undefined;
 
     const site = getSite(config, parsed.data.siteKey);
     if (!site) {
@@ -1168,6 +1384,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       { headers: request.headers, ip: request.ip },
       config.nodeEnv === "production",
       parsed.data.risk,
+      clientContext,
     );
     request.log.info(
       {
@@ -1180,6 +1397,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         platform: risk.platform,
         system: risk.system,
         siteKey: parsed.data.siteKey,
+        timezone: clientContext?.timezone,
+        systemLanguage: clientContext?.systemLanguage,
+        selectedLanguage: clientContext?.selectedLanguage,
       },
       "risk assessed",
     );
@@ -1202,7 +1422,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       parsed.data.siteKey,
       parsed.data.action,
       origin,
-      parsed.data.accessible,
+      parsed.data.accessible || (parsed.data.accessibilityNeeds?.length ?? 0) > 0,
       parsed.data.challengeType,
       risk.level,
       parsed.data.steps,
@@ -1210,13 +1430,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       deviceClassFor(request),
       false,
       Boolean(bypass),
+      parsed.data.accessibilityNeeds,
     );
 
     reply.header("X-Oxygen-Challenge-Id", state.id);
-    return serializeChallenge(state, config);
-  });
+    return serializeChallenge(state, config, apiVersion);
+  };
 
-  app.post("/v1/challenges/:id/verify", async (request, reply) => {
+  app.post("/v1/challenges", createChallengeHandler);
+  app.post("/v2/challenges", createChallengeHandler);
+
+  const verifyChallengeHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
     const parsed = verifySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ verified: false, code: "INVALID_REQUEST" });
@@ -1280,7 +1507,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       return reply.send(result.receipt);
     }
     if (result.kind === "step") {
-      const nextChallenge = serializeChallenge(result.nextState, config);
+      const apiVersion = apiVersionForRequest(request);
+      const nextChallenge = serializeChallenge(
+        result.nextState,
+        config,
+        apiVersion,
+      );
       return reply.send({
         verified: false,
         stepPassed: true,
@@ -1292,7 +1524,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         nextChallenge,
         nextEmbedUrl: `${apiBase(config)}/embed?session=${encodeURIComponent(result.session.id)}&launch=1${
           result.session.testMode && config.nodeEnv !== "production" ? "&test=1" : ""
-        }`,
+        }${apiVersion === "2" ? "&apiVersion=2" : ""}`,
       });
     }
 
@@ -1304,9 +1536,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
           ? 410
           : 200;
     return reply.code(status).send({ verified: false, code, ...("remainingAttempts" in result.failure ? { remainingAttempts: result.failure.remainingAttempts } : {}) });
-  });
+  };
 
-  app.post("/v1/challenges/:id/swap", async (request, reply) => {
+  app.post("/v1/challenges/:id/verify", verifyChallengeHandler);
+  app.post("/v2/challenges/:id/verify", verifyChallengeHandler);
+
+  const swapChallengeHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
     const parsed = swapSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       return reply.code(400).send({ swapped: false, code: "INVALID_REQUEST" });
@@ -1315,7 +1553,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (!state) {
       return reply.code(404).send({ swapped: false, code: "CHALLENGE_NOT_FOUND" });
     }
-    const result = challenges.swap(state.id, parsed.data.accessible);
+    const result = challenges.swap(
+      state.id,
+      parsed.data.accessible,
+      parsed.data.accessibilityNeeds,
+    );
     if (result.kind === "failed") {
       return reply.code(403).send({
         swapped: false,
@@ -1325,6 +1567,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     const swappedSession = result.sessionId
       ? challenges.getSession(result.sessionId)
       : undefined;
+    const apiVersion = apiVersionForRequest(request);
     return {
       swapped: true,
       challengeId: result.state.id,
@@ -1342,117 +1585,137 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
                 : ""
             }${
               parsed.data.accessible ? "&accessible=1" : ""
-            }`,
+            }${apiVersion === "2" ? "&apiVersion=2" : ""}`,
           }),
     };
-  });
+  };
 
-  app.get("/v1/challenges/:id/overlay.svg", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const state = challenges.getForAsset(id);
-    if (!state || state.type !== "inverse_occlusion") {
-      return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
-    }
-    reply
-      .header("Content-Type", "image/svg+xml; charset=utf-8")
-      .header("Content-Disposition", "inline")
-      .header("Cache-Control", "no-store")
-      .header("X-Robots-Tag", "noindex, nofollow");
-    return reply.send(renderChallengeSvg(state));
-  });
+  app.post("/v1/challenges/:id/swap", swapChallengeHandler);
+  app.post("/v2/challenges/:id/swap", swapChallengeHandler);
 
-  app.get("/v1/challenges/:id/audio.wav", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const state = challenges.getForAsset(id);
-    if (!state || state.type !== "inverse_occlusion" || !state.visibleCode) {
-      return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
-    }
-    const wave = renderDtmfWave(state.visibleCode);
-    reply
-      .header("Content-Type", "audio/wav")
-      .header("Content-Disposition", "inline; filename=oxygenchallenge.wav")
-      .header("Cache-Control", "no-store")
-      .header("X-Robots-Tag", "noindex, nofollow");
-    return reply.send(wave);
-  });
+  for (const apiVersion of SUPPORTED_API_VERSIONS) {
+    const challengePath = `/v${apiVersion}/challenges/:id`;
 
-  app.get("/v1/challenges/:id/sequence.wav", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const state = challenges.getForAsset(id);
-    if (!state || state.type !== "audio_sequence" || !state.audioSequence) {
-      return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
-    }
-    const wave = renderAnimalSequenceWave(state.audioSequence.animals);
-    reply
-      .header("Content-Type", "audio/wav")
-      .header("Content-Disposition", "inline; filename=oxygenchallenge-sequence.wav")
-      .header("Cache-Control", "no-store")
-      .header("X-Robots-Tag", "noindex, nofollow");
-    return reply.send(wave);
-  });
+    app.get(`${challengePath}/overlay.svg`, async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const state = challenges.getForAsset(id);
+      if (!state || state.type !== "inverse_occlusion") {
+        return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
+      }
+      reply
+        .header("Content-Type", "image/svg+xml; charset=utf-8")
+        .header("Content-Disposition", "inline")
+        .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow");
+      return reply.send(renderChallengeSvg(state));
+    });
 
-  app.get("/v1/animal-sounds/:animal.wav", async (request, reply) => {
-    const { animal } = request.params as { animal: string };
-    const animals: AnimalSound[] = [
-      "cat",
-      "dog",
-      "bird",
-      "monkey",
-      "horse",
-      "snake",
-      "bear",
-      "mouse",
-      "elephant",
-      "seal",
-    ];
-    if (!animals.includes(animal as AnimalSound)) {
-      return reply.code(404).send({ error: "ANIMAL_NOT_FOUND" });
-    }
-    const wave = renderAnimalSequenceWave([animal as AnimalSound]);
-    reply
-      .header("Content-Type", "audio/wav")
-      .header("Content-Disposition", "inline");
-    return reply.send(wave);
-  });
+    app.get(`${challengePath}/audio.wav`, async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const state = challenges.getForAsset(id);
+      if (!state || state.type !== "inverse_occlusion" || !state.visibleCode) {
+        return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
+      }
+      const wave = renderDtmfWave(state.visibleCode);
+      reply
+        .header("Content-Type", "audio/wav")
+        .header("Content-Disposition", "inline; filename=oxygenchallenge.wav")
+        .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow");
+      return reply.send(wave);
+    });
 
-  app.get("/v1/challenges/:id/target.svg", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const state = challenges.getForAsset(id);
-    if (!state || state.type !== "grid_select" || !state.grid) {
-      return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
-    }
-    reply
-      .header("Content-Type", "image/svg+xml; charset=utf-8")
-      .header("Cache-Control", "no-store")
-      .header("X-Robots-Tag", "noindex, nofollow");
-    return reply.send(renderTargetSvg(state.grid.targetKey));
-  });
+    app.get(`${challengePath}/sequence.wav`, async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const state = challenges.getForAsset(id);
+      if (!state || state.type !== "audio_sequence" || !state.audioSequence) {
+        return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
+      }
+      const wave = renderAnimalSequenceWave(state.audioSequence.animals);
+      reply
+        .header("Content-Type", "audio/wav")
+        .header("Content-Disposition", "inline; filename=oxygenchallenge-sequence.wav")
+        .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow");
+      return reply.send(wave);
+    });
 
-  app.get("/v1/challenges/:id/tile/:index.svg", async (request, reply) => {
-    const { id, index } = request.params as { id: string; index: string };
-    const state = challenges.getForAsset(id);
-    const tileIndex = Number.parseInt(index, 10);
-    if (
-      !state ||
-      state.type !== "grid_select" ||
-      !state.grid ||
-      !Number.isInteger(tileIndex) ||
-      tileIndex < 0 ||
-      tileIndex >= state.grid.itemKeys.length
-    ) {
-      return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
-    }
-    reply
-      .header("Content-Type", "image/svg+xml; charset=utf-8")
-      .header("Cache-Control", "no-store")
-      .header("X-Robots-Tag", "noindex, nofollow");
-    return reply.send(renderGridItemSvg(state.grid.itemKeys[tileIndex] ?? "cat", tileIndex));
-  });
+    app.get(`/v${apiVersion}/animal-sounds/:animal.wav`, async (request, reply) => {
+      const { animal } = request.params as { animal: string };
+      const animals: AnimalSound[] = [
+        "cat",
+        "dog",
+        "bird",
+        "monkey",
+        "horse",
+        "snake",
+        "bear",
+        "mouse",
+        "elephant",
+        "seal",
+      ];
+      if (!animals.includes(animal as AnimalSound)) {
+        return reply.code(404).send({ error: "ANIMAL_NOT_FOUND" });
+      }
+      const wave = renderAnimalSequenceWave([animal as AnimalSound]);
+      reply
+        .header("Content-Type", "audio/wav")
+        .header("Content-Disposition", "inline");
+      return reply.send(wave);
+    });
+
+    app.get(`${challengePath}/target.svg`, async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const state = challenges.getForAsset(id);
+      if (!state || state.type !== "grid_select" || !state.grid) {
+        return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
+      }
+      reply
+        .header("Content-Type", "image/svg+xml; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow");
+      return reply.send(renderTargetSvg(state.grid.targetKey));
+    });
+
+    app.get(`${challengePath}/tile/:index.svg`, async (request, reply) => {
+      const { id, index } = request.params as { id: string; index: string };
+      const state = challenges.getForAsset(id);
+      const tileIndex = Number.parseInt(index, 10);
+      if (
+        !state ||
+        state.type !== "grid_select" ||
+        !state.grid ||
+        !Number.isInteger(tileIndex) ||
+        tileIndex < 0 ||
+        tileIndex >= state.grid.itemKeys.length
+      ) {
+        return reply.code(410).send({ error: "CHALLENGE_EXPIRED" });
+      }
+      reply
+        .header("Content-Type", "image/svg+xml; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow");
+      return reply.send(
+        renderGridItemSvg(state.grid.itemKeys[tileIndex] ?? "cat", tileIndex),
+      );
+    });
+  }
 
   app.get("/embed", async (request, reply) => {
     const parsed = embedSchema.safeParse(request.query);
     if (!parsed.success) {
       return reply.code(400).type("text/html").send(errorPage(400, "嵌入参数不完整"));
+    }
+    const embedApiVersion =
+      parsed.data.apiVersion ?? (parsed.data.clientContext ? API_NEXT_VERSION : API_VERSION);
+    const embeddedClientContext = parseClientContext(parsed.data.clientContext);
+    const accessibilityNeeds = parseAccessibilityNeeds(parsed.data.accessibilityNeeds);
+    const embedAccessible = parsed.data.accessible || accessibilityNeeds.length > 0;
+    if (embedApiVersion === API_NEXT_VERSION && !embeddedClientContext) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(errorPage(400, "API v2 需要有效的客户端上下文"));
     }
 
     let testMode = parsed.data.test && config.nodeEnv !== "production";
@@ -1462,7 +1725,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       action: parsed.data.action,
       parentOrigin: null as string | null,
       sessionId: parsed.data.session,
-      accessible: parsed.data.accessible,
+      accessible: embedAccessible,
       testMode,
       bypass: false,
     };
@@ -1484,7 +1747,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         action: session.action,
         parentOrigin: session.parentOrigin,
         sessionId: session.id,
-        accessible: parsed.data.accessible || session.accessible,
+        accessible: embedAccessible || session.accessible,
         testMode,
         bypass: session.bypass,
       };
@@ -1517,7 +1780,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         action: parsed.data.action,
         parentOrigin,
         sessionId: undefined,
-        accessible: parsed.data.accessible,
+        accessible: embedAccessible,
         testMode,
         bypass: Boolean(bypass),
       };
@@ -1551,13 +1814,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         { headers: request.headers, ip: request.ip },
         config.nodeEnv === "production",
         parsed.data.risk,
+        embeddedClientContext,
       );
 
       state = challenges.create(
         siteKey,
         parsed.data.action,
         parentOrigin,
-        parsed.data.accessible,
+        embedAccessible,
         parsed.data.challengeType,
         risk.level,
         parsed.data.steps,
@@ -1565,6 +1829,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         deviceClassFor(request),
         false,
         Boolean(bypass),
+        accessibilityNeeds,
       );
     }
     if (!parsed.data.launch) {
@@ -1585,10 +1850,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       .header("X-Robots-Tag", "noindex, nofollow")
       .header("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; frame-ancestors *; base-uri 'none'; form-action 'self'")
       .header("Permissions-Policy", "camera=(self), microphone=(self)");
-    return reply.send(embedHtml(state, config, testMode));
+    return reply.send(embedHtml(state, config, testMode, embedApiVersion));
   });
 
-  app.post("/v1/siteverify", async (request, reply) => {
+  const siteverifyHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
     if (!apiVersionAllowed(request)) {
       return reply.code(400).send({ error: "API_VERSION_MISMATCH" });
     }
@@ -1623,7 +1891,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       challengeTs: new Date(verification.payload.iat * 1000).toISOString(),
       errorCodes: [],
     };
-  });
+  };
+
+  app.post("/v1/siteverify", siteverifyHandler);
+  app.post("/v2/siteverify", siteverifyHandler);
 
   await registerPlatform(app, config, platformStore);
 

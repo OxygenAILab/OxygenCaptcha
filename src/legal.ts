@@ -22,7 +22,7 @@ const DOCUMENTS = {
       title: "隐私政策",
       summary:
         "本政策说明 OxygenAI Tech., SG 运营的 OxygenChallenge 如何在下发验证挑战、评估请求风险、管理开放平台和处理音视频权限时使用信息。",
-      updated: "生效日期：2026 年 11 月 8 日",
+      updated: "生效日期：2026 年 11 月 9 日",
       languagePriority:
         "英文版本为具有法律效力的权威文本；中文版本用于阅读便利。若两者不一致，以英文版本为准。",
       sections: [
@@ -31,6 +31,7 @@ const DOCUMENTS = {
           bullets: [
             "交互与验证信息：挑战类型和步骤、答案或选择、鼠标或触摸轨迹、按键状态、覆盖与停留时长、交易模拟记录、验证结果和时间戳。",
             "设备与请求信息：浏览器类型、User-Agent、Client Hints、操作系统版本、语言、屏幕与输入能力、公网 IP、请求时间、来源页面、设备和能力一致性信号。",
+            "vNext 客户端上下文：时区与 UTC 偏移、系统语言、语言偏好列表、消费端选择的界面语言、颜色模式、减少动态效果设置、屏幕尺寸、并发能力、设备内存、触控点数、Cookie 状态与自动化浏览器标志。",
             "安全与风险信息：Cloudflare 提供的网络与国家/地区元数据、请求频率、自动化特征、内部风险评分、异常轮换信号和验证事件日志。",
             "OxygenAccount 开发者资料：登录开放平台时，依据已授权 scope 接收账号标识、昵称、头像、邮箱以及必要的账户类型判断结果。",
             "应用与配置信息：应用名称、site key、允许的 origin/action、加密保存的 secret、开发 IP 免验证规则及到期时间。",
@@ -51,6 +52,7 @@ const DOCUMENTS = {
           bullets: [
             "履行服务合同或应你请求采取措施：创建和验证挑战、签发令牌、提供开放平台、维护应用配置和处理支持请求。",
             "基于正当利益：防止重放、自动化、批量攻击、账户滥用和服务故障，维护网络与接口安全并改进验证质量。",
+            "风险适配：比较浏览器时区、系统语言、用户选择语言、设备能力与网络元数据，以调整挑战数量和题型，并识别明显不一致或自动化环境。",
             "基于同意：访问摄像头或麦克风，以及在适用法律要求时使用非必要本地存储。你可以拒绝或撤回同意，但不影响此前处理的合法性。",
             "履行法律义务：回应有效法律请求、处理争议、保留必要审计记录并执行适用平台的合规要求。",
           ],
@@ -128,7 +130,7 @@ const DOCUMENTS = {
       title: "用户协议",
       summary:
         "本协议约束 OxygenAI Tech., SG 运营的 OxygenChallenge 网站、验证组件、API、开放平台及开发者工具。访问或使用服务即表示同意本协议。",
-      updated: "生效日期：2026 年 11 月 8 日",
+      updated: "生效日期：2026 年 11 月 9 日",
       languagePriority:
         "英文版本为具有法律效力的权威文本；中文版本用于阅读便利。若两者不一致，以英文版本为准。",
       sections: [
@@ -159,6 +161,8 @@ const DOCUMENTS = {
             "不得仅依赖浏览器传来的 verified 字段，不得自行伪造、重放或跨 action/site key 复用 token。",
             "根据业务风险设计验证触发和二次验证，不得把 CAPTCHA 作为高影响决策的唯一证据。",
             "应为摄像头、麦克风、Cookie、localStorage 和其他数据处理提供适用法律要求的通知与同意。",
+            "通过 API vNext 传入客户端时区、系统语言、屏幕/能力信号和用户选择语言时，应保证来源与含义真实，不得伪造或代填终端用户选择。",
+            "无障碍理由应由实际受挑战用户选择；客户不得代替用户勾选、强迫选择不准确理由或利用无障碍模式规避安全控制。",
             "应遵守 API 版本、弃用、速率限制、origin 白名单和无障碍要求，并为终端用户提供可用的替代验证路径。",
           ],
         },
@@ -257,7 +261,7 @@ const DOCUMENTS = {
       title: "Privacy Policy",
       summary:
         "This Policy explains how OxygenChallenge, operated by OxygenAI Tech., SG, handles information when issuing challenges, assessing request risk, operating the Open Platform, and using camera or microphone permissions.",
-      updated: "Effective date: November 8, 2026",
+      updated: "Effective date: November 9, 2026",
       languagePriority:
         "The English version is the authoritative legal text. The Chinese translation is provided for convenience; if they conflict, the English version controls.",
       sections: [
@@ -266,6 +270,7 @@ const DOCUMENTS = {
           bullets: [
             "Interaction and verification data: challenge type and step, answers or selections, pointer or touch paths, key state, coverage and dwell duration, simulated trade records, verification results, and timestamps.",
             "Device and request data: browser and User-Agent, Client Hints, operating-system version, language, screen and input capabilities, public IP address, request time, referring page, and device-capability consistency signals.",
+            "vNext client context: timezone and UTC offset, system language, language-preference list, customer-selected interface language, color scheme, reduced-motion preference, screen size, concurrency, device memory, touch points, cookie state, and browser-automation indicators.",
             "Security and risk data: network and country/region metadata supplied by Cloudflare, request frequency, automation indicators, internal risk scores, abnormal rotation signals, and verification event logs.",
             "OxygenAccount developer data: when you sign in to the Open Platform, the account identifier, display name, avatar, email, and necessary account-type determination permitted by approved scopes.",
             "Application and configuration data: application name, site key, allowed origins/actions, encrypted site secret, development IP bypass rules, and expiration times.",
@@ -286,6 +291,7 @@ const DOCUMENTS = {
           bullets: [
             "Contract or steps requested by you: create and verify challenges, issue tokens, operate the Open Platform, maintain application configuration, and provide support.",
             "Legitimate interests: prevent replay, automation, bulk attacks, account abuse, and service failure; protect network and API security; and improve verification quality.",
+            "Risk adaptation: compare browser timezone, system language, user-selected language, device capability, and network metadata to adjust challenge count and type and identify inconsistent or automated environments.",
             "Consent: access camera or microphone and use non-essential local storage where consent is legally required. You may refuse or withdraw consent without affecting prior lawful processing.",
             "Legal obligation: respond to valid legal process, handle disputes, retain necessary audit records, and comply with applicable platform obligations.",
           ],
@@ -363,7 +369,7 @@ const DOCUMENTS = {
       title: "User Agreement",
       summary:
         "This Agreement governs the OxygenChallenge website, verification widget, APIs, Open Platform, and developer tools operated by OxygenAI Tech., SG. Accessing or using the Service constitutes acceptance.",
-      updated: "Effective date: November 8, 2026",
+      updated: "Effective date: November 9, 2026",
       languagePriority:
         "The English version is the authoritative legal text. The Chinese translation is provided for convenience; if they conflict, the English version controls.",
       sections: [
@@ -394,6 +400,8 @@ const DOCUMENTS = {
             "Do not trust a browser-supplied verified field, forge tokens, replay tokens, or reuse a token across actions or site keys.",
             "Design verification triggers and secondary checks for your business risk; do not use CAPTCHA as the sole evidence for high-impact decisions.",
             "Provide notices and obtain consent for camera, microphone, cookies, localStorage, and other processing where required by law.",
+            "When supplying vNext timezone, system-language, screen/capability, or user-selected-language data, ensure its source and meaning are accurate and do not fabricate or substitute the end user's choice.",
+            "Accessibility reasons must be selected by the person attempting verification; Customers must not prefill inaccurate reasons or use accessibility mode to evade security controls.",
             "Follow API versions, deprecation notices, rate limits, origin allowlists, and accessibility requirements, and provide a usable alternative verification path.",
           ],
         },

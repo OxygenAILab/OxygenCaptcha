@@ -1,14 +1,14 @@
 # OxygenChallenge API
 
-版本：`26.0.0-alpha.9`
+版本：`26.0.0-alpha.10`
 
 ## 先决条件
 
 - 请求源必须在站点 `origins` 白名单中。
-- `POST /v1/challenges` 需要浏览器 `Origin` 或 `Referer`。
+- `POST /v1/challenges` 和 `POST /v2/challenges` 需要浏览器 `Origin` 或 `Referer`。
 - `POST /v1/siteverify` 只允许客户服务端调用，必须使用站点 secret。
-- 客户端可以选择发送 `X-Oxygen-Challenge-API-Version: 1`；发送不兼容版本时返回
-  `400 API_VERSION_MISMATCH`。所有 `/v1/**` 响应都会回传同一版本头。
+- 客户端可以选择发送 `X-Oxygen-Challenge-API-Version: 1` 或 `2`；发送不兼容版本时返回
+  `400 API_VERSION_MISMATCH`。`/v1/**` 与 `/v2/**` 响应会分别回传 `1` 与 `2`。
 - 所有 Challenge 和令牌均为一次性；资源 URL 不应被代理缓存。
 
 ## 创建 Challenge
@@ -34,7 +34,37 @@
 | `high` | 6 |
 | `critical` | 8 |
 
-测试或特殊接入可使用 `steps: 1..8` 覆盖步数。`accessible: true` 始终为单步反色题。
+测试或特殊接入可使用 `steps: 1..8` 覆盖步数。`accessible: true` 且提供 `accessibilityNeeds` 时按理由组合可用题型；未提供理由时保留单步反色题兼容行为。
+
+## vNext 客户端上下文
+
+`/v2/challenges` 必须提供 `clientContext`。Web Component 默认收集并通过 `/embed` 传递；
+直接 API 调用示例：
+
+```json
+{
+  "siteKey": "oc_public_demo",
+  "action": "submit",
+  "clientContext": {
+    "timezone": "Asia/Shanghai",
+    "timezoneOffsetMinutes": -480,
+    "systemLanguage": "zh-CN",
+    "languages": ["zh-CN", "en-US"],
+    "selectedLanguage": "zh-CN",
+    "screen": {
+      "width": 1440,
+      "height": 900,
+      "pixelRatio": 1.25
+    },
+    "webdriver": false
+  }
+}
+```
+
+`selectedLanguage` 是消费端用户选择的界面语言，不是浏览器默认语言。`/v2/risk/assess`
+可先返回 `risk`、`score`、`recommendedSteps` 和风险原因，消费者再决定是否创建挑战。
+vNext 创建响应中的资源 URL 会使用 `/v2/challenges/:id/*` 与
+`/v2/animal-sounds/:animal.wav`，与调用方的 API 版本保持一致。
 
 | 类型 | 交互 |
 |---|---|
@@ -54,7 +84,9 @@
 | `hand_motion` | 按顺序完成 WebCam 动态手势 |
 | `speech_wave` | 多遍朗读并比较目标字词窗口 |
 
-`accessible: true` 会强制使用 `inverse_occlusion`，并提供 DTMF 音频替代。
+`accessible: true` 且传入 `accessibilityNeeds` 时，会按可用感官组合多步骤题型。
+`accessibilityNeeds` 可取 `vision`、`motor`、`hearing`、`speech`、`cognitive`，
+至少一项、最多四项。未提供 `accessibilityNeeds` 时保留单步反色题与 DTMF 的兼容行为。
 
 ### 公开预览
 
