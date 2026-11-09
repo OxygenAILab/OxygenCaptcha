@@ -1,6 +1,6 @@
 # 部署状态
 
-当前版本：`v26.0.1`
+当前版本：`v26.0.2`
 
 ## 已完成
 
@@ -15,7 +15,7 @@
   `Host: captcha.oxygenai.top`，均返回健康。
 - 使用 `curl --resolve captcha.oxygenai.top:443:154.219.110.138` 验证了目标域名路由、
   `/embed` 的诱饵文本、SVG overlay 和 `frame.js` 引用。
-- `v26.0.1` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
+- `v26.0.2` 已部署，`/v1/meta` 返回 `apiVersion=1`、十五种题型和
   low/medium/high/critical 风险步数。
 - 官网 `/`、随机挑战 `/captcha`、`/platform` 和 OxygenAccount OAuth 入口均已上线；
   官网顶部横幅会自动识别语言并支持中英文切换。
@@ -80,5 +80,8 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
 - 2026-11-09：`v26.0.1` 修复宿主框架替换整个 `<oxygen-challenge>` 元素时的完成态丢失。
   新元素会从页面级完成状态或同一表单的隐藏 `oxygen-token` 字段恢复“验证通过”，
   不再重新渲染为待验证入口。
+- 2026-11-09：`v26.0.2` 修复多步 vNext 会话进入下一题时的 HTTP 400。首题建立的
+  服务端 session 现在可以继续 `/embed?session=...&apiVersion=2`，不再要求续页重复
+  携带完整 `clientContext`。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->

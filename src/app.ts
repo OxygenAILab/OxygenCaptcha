@@ -67,8 +67,8 @@ const ACCESSIBILITY_NEEDS = ["vision", "motor", "hearing", "speech", "cognitive"
 const API_VERSION = "1";
 const API_NEXT_VERSION = "2";
 const SUPPORTED_API_VERSIONS = [API_VERSION, API_NEXT_VERSION] as const;
-const APP_VERSION = "v26.0.1";
-const ASSET_VERSION = "26.0.1";
+const APP_VERSION = "v26.0.2";
+const ASSET_VERSION = "26.0.2";
 
 const clientContextSchema = z.object({
   timezone: z.string().trim().min(1).max(64),
@@ -1711,7 +1711,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     const embeddedClientContext = parseClientContext(parsed.data.clientContext);
     const accessibilityNeeds = parseAccessibilityNeeds(parsed.data.accessibilityNeeds);
     const embedAccessible = parsed.data.accessible || accessibilityNeeds.length > 0;
-    if (embedApiVersion === API_NEXT_VERSION && !embeddedClientContext) {
+    if (
+      embedApiVersion === API_NEXT_VERSION &&
+      !embeddedClientContext &&
+      !parsed.data.session
+    ) {
       return reply
         .code(400)
         .type("text/html")

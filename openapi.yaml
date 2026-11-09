@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.1
+  version: 26.0.2
   description: Risk-aware CAPTCHA API with v1 compatibility and vNext client-context risk assessment.
   license:
     name: Apache-2.0

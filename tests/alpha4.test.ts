@@ -325,7 +325,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0.1" });
+      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0.2" });
 
       const mismatch = await built.app.inject({
         method: "POST",
@@ -481,6 +481,63 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       const tile = await built.app.inject({ method: "GET", url: tilePath });
       expect(tile.statusCode).toBe(200);
       expect(tile.headers["content-type"]).toContain("image/svg+xml");
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("continues an existing v2 session without requiring clientContext again", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-v2-session-")),
+    });
+    try {
+      const context = {
+        timezone: "Asia/Hong_Kong",
+        timezoneOffsetMinutes: -480,
+        systemLanguage: "zh-HK",
+        languages: ["zh-HK", "en"],
+        selectedLanguage: "zh-CN",
+        screen: { width: 1440, height: 900, pixelRatio: 1 },
+      };
+      const created = await built.app.inject({
+        method: "POST",
+        url: "/v2/challenges",
+        headers: { origin: "https://app.test" },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          risk: "critical",
+          steps: 2,
+          accessible: true,
+          accessibilityNeeds: ["vision", "motor", "hearing", "speech"],
+          clientContext: context,
+        },
+      });
+      expect(created.statusCode).toBe(200);
+      const first = created.json<{ challengeId: string; totalSteps: number }>();
+      expect(first.totalSteps).toBe(2);
+      const firstState = stateFor(built, first.challengeId);
+      const verified = await built.app.inject({
+        method: "POST",
+        url: `/v2/challenges/${first.challengeId}/verify`,
+        headers: { origin: "https://app.test" },
+        payload: evidenceFor(firstState),
+      });
+      expect(verified.statusCode).toBe(200);
+      const step = verified.json<{ stepPassed: boolean; nextEmbedUrl: string }>();
+      expect(step.stepPassed).toBe(true);
+      expect(step.nextEmbedUrl).toContain("apiVersion=2");
+      expect(step.nextEmbedUrl).not.toContain("clientContext=");
+
+      const nextUrl = new URL(step.nextEmbedUrl);
+      const nextEmbed = await built.app.inject({
+        method: "GET",
+        url: `${nextUrl.pathname}${nextUrl.search}`,
+      });
+      expect(nextEmbed.statusCode).toBe(200);
+      expect(nextEmbed.body).toContain('data-api-version="2"');
     } finally {
       await built.app.close();
     }
@@ -807,7 +864,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       }
       const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
       expect(openapi.statusCode).toBe(200);
-      expect(openapi.body).toContain("version: 26.0.1");
+      expect(openapi.body).toContain("version: 26.0.2");
     } finally {
       await built.app.close();
     }
