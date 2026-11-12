@@ -181,12 +181,14 @@ with sync_playwright() as playwright:
     hand, hand_errors = open_page(browser, {"width": 900, "height": 820})
     hand.goto(embed_url("hand_motion"), wait_until="networkidle")
     assert hand.locator("#oc-hand-video").is_visible()
-    hand.locator("#oc-hand-start").click()
-    hand.wait_for_function(
-        "() => document.querySelector('#oc-status')?.textContent.includes('摄像头')",
-        timeout=15_000,
-    )
-    hand.screenshot(path=str(OUT / "production-hand-permission.png"), full_page=True)
+    hand.locator("#oc-media-optout").click()
+    hand.locator("#oc-accessibility-panel").wait_for(state="visible")
+    assert hand.locator('#oc-accessibility-panel input[value="media"]').is_checked()
+    assert "我现在不方便使用麦克风/摄像头。" in hand.locator(
+        "#oc-accessibility-panel"
+    ).inner_text()
+    assert_no_horizontal_overflow(hand)
+    hand.screenshot(path=str(OUT / "production-hand-fallback.png"), full_page=True)
     assert not hand_errors, hand_errors
 
     platform, platform_errors = open_page(browser, {"width": 900, "height": 760})
