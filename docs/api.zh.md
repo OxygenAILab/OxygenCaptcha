@@ -1,6 +1,6 @@
 # OxygenChallenge API
 
-版本：`26.0.2`
+版本：`26.0.3`
 
 ## 先决条件
 
@@ -85,7 +85,7 @@ vNext 创建响应中的资源 URL 会使用 `/v2/challenges/:id/*` 与
 | `speech_wave` | 多遍朗读并比较目标字词窗口 |
 
 `accessible: true` 且传入 `accessibilityNeeds` 时，会按可用感官组合多步骤题型。
-`accessibilityNeeds` 可取 `vision`、`motor`、`hearing`、`speech`、`cognitive`，
+`accessibilityNeeds` 可取 `vision`、`motor`、`hearing`、`speech`、`cognitive`、`media`，
 至少一项、最多四项。未提供 `accessibilityNeeds` 时保留单步反色题与 DTMF 的兼容行为。
 
 ### 公开预览

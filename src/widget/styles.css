@@ -225,6 +225,34 @@ body.oc-entry-page {
   padding: 0 14px;
 }
 
+.oc-card > .oc-accessibility-panel {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+.oc-text-button.oc-media-optout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 2px;
+  color: #2f6fed;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.oc-helper-row {
+  display: grid;
+  gap: 0;
+  margin-top: -4px;
+}
+
+.oc-helper-row .oc-helper {
+  margin: 0;
+}
+
 .oc-entry-accessibility {
   position: absolute;
   right: 2px;
@@ -994,7 +1022,7 @@ button:disabled {
   border: 1px solid #cbd5e3;
   border-radius: 6px;
   background: #172033;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: 16 / 9;
 }
 
 .oc-camera-wrap video,

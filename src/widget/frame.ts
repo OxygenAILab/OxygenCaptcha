@@ -91,6 +91,7 @@ const submit = document.querySelector<HTMLButtonElement>("#oc-submit");
 const refresh = document.querySelector<HTMLButtonElement>("#oc-refresh");
 const audioButton = document.querySelector<HTMLButtonElement>("#oc-audio");
 const accessibleButton = document.querySelector<HTMLButtonElement>("#oc-accessible");
+const mediaOptout = document.querySelector<HTMLButtonElement>("#oc-media-optout");
 const player = document.querySelector<HTMLAudioElement>("#oc-player");
 const status = document.querySelector<HTMLElement>("#oc-status");
 const grid = document.querySelector<HTMLElement>("#oc-grid");
@@ -180,6 +181,7 @@ let marketCapitalValue = 0;
 let marketController: MarketController | null = null;
 let keyPointerEvidence: { holdMs: number; distance: number; keyCode: string } | null =
   null;
+let accessibilityReturnFocus: HTMLElement | null = null;
 let keyPointerReady = false;
 let verified = false;
 let motionPoint: MotionPoint | null = null;
@@ -339,55 +341,141 @@ function selectedAccessibilityNeeds(): string[] {
 function updateAccessibilityPicker(): void {
   const needs = selectedAccessibilityNeeds();
   if (accessibilityStart) {
-    accessibilityStart.disabled = needs.length === 0 || needs.length > 4;
+    accessibilityStart.disabled = needs.length === 0;
   }
+  accessibilityInputs.forEach((input) => {
+    input.disabled = !input.checked && needs.length >= 4;
+  });
   if (accessibilityHint) {
     accessibilityHint.textContent =
       needs.length === 0
         ? "请选择至少一项。"
-        : needs.length > 4
-          ? "最多选择四项。"
+        : needs.length >= 4
+          ? "已选择四项，不能全选。"
           : "系统将只使用与你选择的能力相匹配的题型。";
   }
 }
 
-function openAccessibilityPicker(): void {
+function openAccessibilityPicker(
+  preselected: string[] = [],
+  returnFocus: HTMLElement | null = null,
+): void {
   if (!accessibilityPanel) {
-    launchChallenge(true);
+    if (body.dataset.entry === "1") {
+      launchChallenge(true, preselected);
+    }
     return;
   }
+  accessibilityReturnFocus = returnFocus;
   accessibilityInputs.forEach((input) => {
-    input.checked = false;
+    input.disabled = false;
+    input.checked = preselected.includes(input.value);
   });
   accessibilityPanel.classList.remove("hidden");
   updateAccessibilityPicker();
   reportHeight();
-  accessibilityInputs[0]?.focus();
+  (accessibilityInputs.find((input) => input.checked) ??
+    accessibilityInputs[0])?.focus();
 }
 
 function closeAccessibilityPicker(): void {
   accessibilityPanel?.classList.add("hidden");
+  accessibilityInputs.forEach((input) => {
+    input.disabled = false;
+  });
   window.setTimeout(reportHeight, 0);
-  entryAccessibility?.focus();
+  accessibilityReturnFocus?.focus();
+  accessibilityReturnFocus = null;
+}
+
+async function submitAccessibleChallenge(needs: string[]): Promise<void> {
+  if (!shell?.dataset.challengeId) {
+    return;
+  }
+  setStatus("正在生成适配验证…");
+  if (accessibleButton) {
+    accessibleButton.disabled = true;
+  }
+  if (mediaOptout) {
+    mediaOptout.disabled = true;
+  }
+  if (accessibilityStart) {
+    accessibilityStart.disabled = true;
+  }
+  try {
+    const response = await fetch(
+      `${challengeApiPrefix}/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessible: true,
+          accessibilityNeeds: needs,
+        }),
+      },
+    );
+    const result = (await response.json()) as {
+      swapped?: boolean;
+      nextEmbedUrl?: string;
+      code?: string;
+    };
+    if (response.ok && result.swapped && result.nextEmbedUrl) {
+      window.location.assign(result.nextEmbedUrl);
+      return;
+    }
+    setStatus(
+      result.code === "SWAP_NOT_ALLOWED"
+        ? "当前设备无法切换验证方式。"
+        : "无法生成适配验证，请刷新后重试。",
+      "error",
+    );
+  } catch {
+    setStatus("网络错误，无法生成适配验证。", "error");
+  }
+  if (accessibleButton) {
+    accessibleButton.disabled = false;
+  }
+  if (mediaOptout) {
+    mediaOptout.disabled = false;
+  }
+  updateAccessibilityPicker();
+}
+
+function submitAccessibilityPicker(): void {
+  const needs = selectedAccessibilityNeeds();
+  if (needs.length === 0 || needs.length > 4) {
+    return;
+  }
+  if (body.dataset.entry === "1") {
+    launchChallenge(true, needs);
+    return;
+  }
+  void submitAccessibleChallenge(needs);
+}
+
+function initAccessibility(): void {
+  appendIcon(entryAccessibility, Accessibility);
+  entryAccessibility?.addEventListener("click", () =>
+    openAccessibilityPicker([], entryAccessibility),
+  );
+  accessibleButton?.addEventListener("click", () =>
+    openAccessibilityPicker([], accessibleButton),
+  );
+  mediaOptout?.addEventListener("click", () =>
+    openAccessibilityPicker(["media"], mediaOptout),
+  );
+  accessibilityInputs.forEach((input) => {
+    input.addEventListener("change", updateAccessibilityPicker);
+  });
+  accessibilityCancel?.addEventListener("click", closeAccessibilityPicker);
+  accessibilityStart?.addEventListener("click", submitAccessibilityPicker);
 }
 
 function initEntry(): void {
   if (body.dataset.entry !== "1" || !entryCheck) {
     return;
   }
-  appendIcon(entryAccessibility, Accessibility);
   entryCheck.addEventListener("click", () => launchChallenge(false));
-  entryAccessibility?.addEventListener("click", openAccessibilityPicker);
-  accessibilityInputs.forEach((input) => {
-    input.addEventListener("change", updateAccessibilityPicker);
-  });
-  accessibilityCancel?.addEventListener("click", closeAccessibilityPicker);
-  accessibilityStart?.addEventListener("click", () => {
-    const needs = selectedAccessibilityNeeds();
-    if (needs.length > 0 && needs.length <= 4) {
-      launchChallenge(true, needs);
-    }
-  });
   if (bypassActive) {
     entryCheck.disabled = true;
     if (entryLabel) {
@@ -1859,6 +1947,7 @@ function initMotion(): void {
 appendIcon(refresh, RefreshCw);
 appendIcon(audioButton, Volume2);
 appendIcon(accessibleButton, Accessibility);
+initAccessibility();
 initEntry();
 initGrid();
 initAudioSequence();
@@ -1948,53 +2037,6 @@ audioButton?.addEventListener("click", () => {
   void player.play().catch(() => {
     setStatus("无法播放音频，请检查设备设置。", "error");
   });
-});
-
-accessibleButton?.addEventListener("click", async () => {
-  play("click");
-  if (!shell?.dataset.challengeId) {
-    return;
-  }
-  setStatus("正在切换到无障碍验证…");
-  accessibleButton.disabled = true;
-  try {
-    const response = await fetch(
-      `${challengeApiPrefix}/challenges/${encodeURIComponent(shell.dataset.challengeId)}/swap`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessible: true }),
-      },
-    );
-    const result = (await response.json()) as {
-      swapped?: boolean;
-      preview?: boolean;
-      nextEmbedUrl?: string;
-      code?: string;
-    };
-    if (!response.ok || !result.swapped) {
-      setStatus(
-        result.code === "SWAP_NOT_ALLOWED"
-          ? "当前设备需要完成原验证。"
-          : "无法切换无障碍验证，请刷新后重试。",
-        "error",
-      );
-      accessibleButton.disabled = false;
-      return;
-    }
-    window.location.assign(
-      result.nextEmbedUrl ??
-        (() => {
-          const url = new URL("/captcha", window.location.origin);
-          url.searchParams.set("launch", "1");
-          url.searchParams.set("accessible", "1");
-          return url.toString();
-        })(),
-    );
-  } catch {
-    setStatus("网络错误，无法切换无障碍验证。", "error");
-    accessibleButton.disabled = false;
-  }
 });
 
 form?.addEventListener("submit", async (event) => {

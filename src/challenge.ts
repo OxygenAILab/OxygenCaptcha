@@ -354,12 +354,17 @@ export class ChallengeStore {
     parentOrigin: string | null,
     deviceClass: DeviceClass,
     accessible = false,
+    accessibilityNeeds: AccessibilityNeed[] = [],
   ): ChallengeState {
     this.cleanup();
+    const hasAccessibilityNeeds = accessible && accessibilityNeeds.length > 0;
     const type =
-      accessible
+      accessible && !hasAccessibilityNeeds
         ? "inverse_occlusion"
-        : chooseTypes(1, this.availableTypes(deviceClass))[0] ??
+        : chooseTypes(
+            1,
+            this.availableTypes(deviceClass, accessibilityNeeds),
+          )[0] ??
           "inverse_occlusion";
     const now = Date.now();
     const state = this.createState({
@@ -375,6 +380,7 @@ export class ChallengeStore {
       expiresAt: now + this.config.challengeTtlSeconds * 1000,
       deviceClass,
       preview: true,
+      accessibilityNeeds,
     });
     this.challenges.set(state.id, state);
     return state;
@@ -394,7 +400,7 @@ export class ChallengeStore {
     }
     if (
       (!state.preview && !state.swapAllowed && !accessible) ||
-      (state.deviceClass ?? "desktop") === "mobile"
+      ((state.deviceClass ?? "desktop") === "mobile" && !accessible)
     ) {
       return {
         kind: "failed",
@@ -410,6 +416,7 @@ export class ChallengeStore {
         state.parentOrigin,
         state.deviceClass ?? "desktop",
         accessible,
+        accessibilityNeeds,
       );
       for (
         let attempt = 0;
@@ -423,13 +430,14 @@ export class ChallengeStore {
           state.parentOrigin,
           state.deviceClass ?? "desktop",
           accessible,
+          accessibilityNeeds,
         );
       }
       return { kind: "swapped", state: replacement };
     }
 
     const session = state.sessionId ? this.getSession(state.sessionId) : undefined;
-    if (!session || session.swapsRemaining <= 0) {
+    if (!session || (!accessible && session.swapsRemaining <= 0)) {
       return {
         kind: "failed",
         failure: { verified: false, code: "SWAP_NOT_ALLOWED" },
@@ -705,7 +713,9 @@ export class ChallengeStore {
           !["audio_sequence", "speech_wave"].includes(type)) &&
         (!accessibilityNeeds.includes("speech") || type !== "speech_wave") &&
         (!accessibilityNeeds.includes("cognitive") ||
-          !["calculation", "pattern_memory", "market_trade", "speech_wave", "count_flash"].includes(type)),
+          !["calculation", "pattern_memory", "market_trade", "speech_wave", "count_flash"].includes(type)) &&
+        (!accessibilityNeeds.includes("media") ||
+          !["hand_motion", "speech_wave"].includes(type)),
     );
   }
 

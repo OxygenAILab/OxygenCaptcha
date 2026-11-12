@@ -795,6 +795,62 @@ describe("OxygenChallenge API", () => {
     expect(replacementState?.type).toBe("inverse_occlusion");
   });
 
+  it("lets mobile camera and microphone challenges use the media accessibility fallback", async () => {
+    for (const mediaType of ["hand_motion", "speech_wave"] as const) {
+      const created = await app.inject({
+        method: "POST",
+        url: "/v1/challenges",
+        headers: {
+          origin: "https://app.test",
+          "user-agent":
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+          "sec-ch-ua-mobile": "?1",
+        },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          challengeType: mediaType,
+        },
+      });
+      expect(created.statusCode).toBe(200);
+      const challenge = created.json<{ challengeId: string; type: ChallengeType }>();
+      expect(challenge.type).toBe(mediaType);
+
+      const swapped = await app.inject({
+        method: "POST",
+        url: `/v1/challenges/${challenge.challengeId}/swap`,
+        headers: { origin: "https://app.test" },
+        payload: {
+          accessibilityNeeds: ["media"],
+        },
+      });
+      expect(swapped.statusCode).toBe(200);
+      expect(swapped.json<{ type: ChallengeType }>().type).not.toBe("hand_motion");
+      expect(swapped.json<{ type: ChallengeType }>().type).not.toBe("speech_wave");
+      expect(swapped.json<{ nextEmbedUrl: string }>().nextEmbedUrl).toContain(
+        "accessibilityNeeds=media",
+      );
+
+      const replacementState = challenges.getForAsset(
+        swapped.json<{ challengeId: string }>().challengeId,
+      );
+      expect(replacementState).toMatchObject({
+        accessible: true,
+        accessibilityNeeds: ["media"],
+      });
+      expect(replacementState?.type).not.toBe("hand_motion");
+      expect(replacementState?.type).not.toBe("speech_wave");
+    }
+
+    const preview = await app.inject({
+      method: "GET",
+      url: "/captcha?launch=1&accessible=1&accessibilityNeeds=media",
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.body).not.toContain('data-challenge-type="hand_motion"');
+    expect(preview.body).not.toContain('data-challenge-type="speech_wave"');
+  });
+
   it("rejects missing and disallowed origins", async () => {
     const missing = await app.inject({
       method: "POST",

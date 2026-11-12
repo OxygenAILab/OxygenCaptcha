@@ -45,10 +45,14 @@ with sync_playwright() as playwright:
         start = page.locator("#oc-accessibility-start")
         assert start.is_disabled()
         boxes = page.locator("#oc-accessibility-panel input[type=checkbox]")
-        for index in range(5):
+        for index in range(4):
             boxes.nth(index).check()
-        assert start.is_disabled()
-        boxes.nth(4).uncheck()
+        assert start.is_enabled()
+        assert boxes.nth(4).is_disabled()
+        assert boxes.nth(5).is_disabled()
+        boxes.nth(3).uncheck()
+        assert boxes.nth(5).is_enabled()
+        boxes.nth(5).check()
         assert start.is_enabled()
         page.screenshot(path=str(OUT / "accessible-reasons.png"), full_page=True)
         start.click()

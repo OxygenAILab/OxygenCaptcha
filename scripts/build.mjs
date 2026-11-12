@@ -35,6 +35,7 @@ await build({
   format: "iife",
   target: ["chrome110", "firefox110", "safari16"],
   outfile: resolve(publicDir, "widget.js"),
+  loader: { ".png": "dataurl" },
   minify: true,
   sourcemap: true,
 });

@@ -1,3 +1,5 @@
+import oxygenMarkUrl from "../../public/oxygenmark.png";
+
 const WIDGET_SOURCE = "oxygenchallenge";
 
 function scriptOrigin(): string {
@@ -75,7 +77,7 @@ function inlineWidgetStyle(): string {
     ".oc-success-check{display:grid;place-items:center;width:29px;height:29px;border-radius:4px;background:#168454}",
     ".oc-success-check::after{content:'';width:7px;height:14px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg) translate(-1px,-1px)}",
     ".oc-success-label{color:#12633f;font-size:15px;font-weight:700;line-height:1.3}",
-    ".oc-success-mark{display:block;width:30px;height:30px;justify-self:end;color:#111}",
+    ".oc-success-mark{display:block;width:30px;height:30px;object-fit:contain;justify-self:end}",
     ".oc-success-brand{display:flex;align-items:center;justify-content:center;min-height:24px;padding-top:4px;color:#6e7a8c;font-size:11px;font-weight:650;text-align:center}",
     ".oc-error{padding:16px;border:1px solid rgba(127,29,29,.35);border-radius:8px;color:#7f1d1d;background:#fef2f2;font:14px/1.5 system-ui,sans-serif}",
   ].join("");
@@ -179,10 +181,7 @@ class OxygenChallengeElement extends HTMLElement {
         <div class="oc-success-bar">
           <span class="oc-success-check" aria-hidden="true"></span>
           <span class="oc-success-label">验证通过</span>
-          <svg class="oc-success-mark" viewBox="0 0 64 64" role="img" aria-label="Oxygen">
-            <circle cx="30" cy="35" r="23" fill="none" stroke="currentColor" stroke-width="6"></circle>
-            <circle cx="38" cy="29" r="18" fill="none" stroke="currentColor" stroke-width="6"></circle>
-          </svg>
+          <img class="oc-success-mark" src="${oxygenMarkUrl}" alt="Oxygen">
         </div>
         <div class="oc-success-brand">Oxygen Challenge</div>
       </div>`;

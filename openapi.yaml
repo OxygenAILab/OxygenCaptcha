@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.2
+  version: 26.0.3
   description: Risk-aware CAPTCHA API with v1 compatibility and vNext client-context risk assessment.
   license:
     name: Apache-2.0
@@ -102,7 +102,7 @@ paths:
                   maxItems: 4
                   items:
                     type: string
-                    enum: [vision, motor, hearing, speech, cognitive]
+                    enum: [vision, motor, hearing, speech, cognitive, media]
       responses:
         "200":
           description: Challenge replaced
@@ -634,7 +634,7 @@ components:
           maxItems: 4
           items:
             type: string
-            enum: [vision, motor, hearing, speech, cognitive]
+            enum: [vision, motor, hearing, speech, cognitive, media]
         clientContext:
           $ref: "#/components/schemas/ClientContext"
     CreateV2ChallengeRequest:
@@ -742,6 +742,12 @@ components:
           type: boolean
         swapAllowed:
           type: boolean
+        accessibilityNeeds:
+          type: array
+          maxItems: 4
+          items:
+            type: string
+            enum: [vision, motor, hearing, speech, cognitive, media]
         expiresAt:
           type: string
           format: date-time

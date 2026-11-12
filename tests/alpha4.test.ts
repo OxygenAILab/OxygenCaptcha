@@ -325,7 +325,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0.2" });
+      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0.3" });
 
       const mismatch = await built.app.inject({
         method: "POST",
@@ -584,7 +584,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
           siteKey: "site_test",
           action: "submit",
           accessible: true,
-          accessibilityNeeds: ["vision", "motor", "hearing", "speech", "cognitive"],
+          accessibilityNeeds: ["vision", "motor", "hearing", "speech", "cognitive", "media"],
         },
       });
       expect(allNeeds.statusCode).toBe(400);
@@ -864,7 +864,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       }
       const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
       expect(openapi.statusCode).toBe(200);
-      expect(openapi.body).toContain("version: 26.0.2");
+      expect(openapi.body).toContain("version: 26.0.3");
     } finally {
       await built.app.close();
     }

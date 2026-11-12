@@ -69,11 +69,13 @@ def open_page(
     viewport: dict[str, int],
     reduced_motion: str = "reduce",
     permissions: list[str] | None = None,
+    user_agent: str | None = None,
 ) -> tuple[Page, list[str]]:
     context = browser.new_context(
         viewport=viewport,
         reduced_motion=reduced_motion,
         permissions=permissions or [],
+        user_agent=user_agent,
     )
     page = context.new_page()
     errors: list[str] = []
@@ -748,16 +750,55 @@ def run_accessible_check(browser: Browser) -> None:
     assert page.locator("#oc-accessibility-start").is_enabled()
     checkboxes.nth(1).check()
     checkboxes.nth(2).check()
-    checkboxes.nth(4).check()
-    assert page.locator("#oc-accessibility-start").is_disabled()
-    checkboxes.nth(4).uncheck()
+    assert page.locator("#oc-accessibility-start").is_enabled()
+    assert checkboxes.nth(4).is_disabled()
+    assert checkboxes.nth(5).is_disabled()
+    checkboxes.nth(2).uncheck()
+    checkboxes.nth(5).check()
     page.locator("#oc-accessibility-start").click()
     page.locator("#oc-form").wait_for(timeout=10_000)
     assert page.locator("body").get_attribute("data-challenge-type") != "inverse_occlusion"
     total_steps = page.locator(".oc-progress").inner_text().strip().split("/")[1]
     assert int(total_steps) >= 3
+    page.locator("#oc-accessible").click()
+    panel.wait_for(state="visible")
+    assert panel.locator("input[type=checkbox]").count() == 6
+    assert "我现在不方便使用麦克风/摄像头。" in panel.inner_text()
+    assert_no_horizontal_overflow(page)
+    page.locator("#oc-accessibility-cancel").click()
     assert_no_overflow(page)
     assert not errors, errors
+
+
+def run_mobile_media_accessibility_check(browser: Browser) -> None:
+    page, errors = open_page(
+        browser,
+        {"width": 390, "height": 844},
+        reduced_motion="no-preference",
+        user_agent=(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 Mobile/15E148"
+        ),
+    )
+    try:
+        page.goto(embed_url("hand_motion"), wait_until="networkidle")
+        page.locator("#oc-media-optout").wait_for(state="visible")
+        page.locator("#oc-media-optout").click()
+        panel = page.locator("#oc-accessibility-panel")
+        panel.wait_for(state="visible")
+        media = panel.locator('input[value="media"]')
+        assert media.is_checked()
+        assert page.locator("#oc-accessibility-start").is_enabled()
+        page.screenshot(path=str(OUT / "mobile-media-accessibility.png"), full_page=True)
+        page.locator("#oc-accessibility-start").click()
+        page.locator("#oc-form").wait_for(timeout=10_000)
+        next_type = page.locator("body").get_attribute("data-challenge-type")
+        assert next_type not in {"hand_motion", "speech_wave"}
+        assert "accessibilityNeeds=media" in page.url
+        assert_no_overflow(page)
+        assert not errors, errors
+    finally:
+        page.context.close()
 
 
 def run_site_checks(browser: Browser) -> None:
@@ -1132,6 +1173,7 @@ with sync_playwright() as playwright:
     run_basic_checks(browser)
     run_media_checks(browser)
     run_accessible_check(browser)
+    run_mobile_media_accessibility_check(browser)
     run_site_checks(browser)
     browser.close()
     browser = playwright.chromium.launch(**launch_options)

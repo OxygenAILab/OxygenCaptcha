@@ -222,7 +222,7 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
             "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
         ) == "验证通过"
         assert widget.evaluate(
-            "(el) => Boolean(el.shadowRoot.querySelector('svg.oc-success-mark'))"
+            "(el) => el.shadowRoot.querySelector('img.oc-success-mark')?.src.startsWith('data:image/png;base64,')"
         )
         assert widget.evaluate("(el) => el.shadowRoot.querySelector('iframe') === null")
         host.evaluate(
@@ -253,7 +253,7 @@ form{{max-width:420px;margin:auto}}button{{min-height:44px;margin-top:12px}}
             "(el) => el.shadowRoot.querySelector('.oc-success-label')?.textContent"
         ) == "验证通过"
         assert restored_widget.evaluate(
-            "(el) => Boolean(el.shadowRoot.querySelector('svg.oc-success-mark'))"
+            "(el) => el.shadowRoot.querySelector('img.oc-success-mark')?.src.startsWith('data:image/png;base64,')"
         )
         assert restored_widget.evaluate(
             "(el) => el.shadowRoot.querySelector('iframe') === null"

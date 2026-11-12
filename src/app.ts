@@ -63,12 +63,19 @@ const CHALLENGE_TYPES = [
 ] as const;
 
 const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
-const ACCESSIBILITY_NEEDS = ["vision", "motor", "hearing", "speech", "cognitive"] as const;
+const ACCESSIBILITY_NEEDS = [
+  "vision",
+  "motor",
+  "hearing",
+  "speech",
+  "cognitive",
+  "media",
+] as const;
 const API_VERSION = "1";
 const API_NEXT_VERSION = "2";
 const SUPPORTED_API_VERSIONS = [API_VERSION, API_NEXT_VERSION] as const;
-const APP_VERSION = "v26.0.2";
-const ASSET_VERSION = "26.0.2";
+const APP_VERSION = "v26.0.3";
+const ASSET_VERSION = "26.0.3";
 
 const clientContextSchema = z.object({
   timezone: z.string().trim().min(1).max(64),
@@ -319,6 +326,9 @@ function serializeChallenge(
     deviceClass: state.deviceClass ?? "desktop",
     preview: state.preview === true,
     swapAllowed: state.swapAllowed === true,
+    ...(state.accessibilityNeeds?.length
+      ? { accessibilityNeeds: state.accessibilityNeeds }
+      : {}),
     expiresAt: new Date(state.expiresAt).toISOString(),
     maxAttempts: state.maxAttempts,
   };
@@ -481,6 +491,27 @@ function serializeChallenge(
     prompt: "拖动圆形遮罩覆盖移动目标",
     motion: state.motion,
   };
+}
+
+function accessibilityPanelHtml(): string {
+  return `
+      <section class="oc-accessibility-panel hidden" id="oc-accessibility-panel" role="dialog" aria-modal="true" aria-labelledby="oc-accessibility-title">
+        <h2 id="oc-accessibility-title">选择需要的验证方式</h2>
+        <p>可多选，至少选择一项，最多选择四项。系统只会使用与你选择的能力相匹配的题型。</p>
+        <div class="oc-accessibility-options">
+          <label><input type="checkbox" value="vision"> 看不清图像或需要屏幕阅读器</label>
+          <label><input type="checkbox" value="motor"> 不便完成拖拽、精细点击或同时操作键盘鼠标</label>
+          <label><input type="checkbox" value="hearing"> 听不清声音或无法辨别音频</label>
+          <label><input type="checkbox" value="speech"> 不便朗读或说话</label>
+          <label><input type="checkbox" value="cognitive"> 需要更短、更简单的阅读或计算任务</label>
+          <label><input type="checkbox" value="media"> 我现在不方便使用麦克风/摄像头。</label>
+        </div>
+        <p class="oc-accessibility-hint" id="oc-accessibility-hint">请选择至少一项。</p>
+        <div class="oc-accessibility-actions">
+          <button class="oc-text-button" type="button" id="oc-accessibility-cancel">取消</button>
+          <button class="oc-submit" type="button" id="oc-accessibility-start" disabled>开始适配验证</button>
+        </div>
+      </section>`;
 }
 
 function challengeBody(
@@ -816,7 +847,10 @@ function challengeBody(
           <span id="oc-hand-progress-fill"></span>
         </div>
       </div>
-      <p class="oc-helper" id="oc-hand-help">请让手部完整出现在画面中。</p>
+      <div class="oc-helper-row">
+        <p class="oc-helper" id="oc-hand-help">请让手部完整出现在画面中。</p>
+        <button class="oc-text-button oc-media-optout" id="oc-media-optout" type="button">我现在不方便使用麦克风/摄像头。</button>
+      </div>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
       </div>`;
@@ -844,7 +878,10 @@ function challengeBody(
         <span class="oc-media-icon" aria-hidden="true"></span>
         <span>录制第 1 遍</span>
       </button>
-      <p class="oc-helper" id="oc-speech-help">请在安静环境中按原句朗读。</p>
+      <div class="oc-helper-row">
+        <p class="oc-helper" id="oc-speech-help">请在安静环境中按原句朗读。</p>
+        <button class="oc-text-button oc-media-optout" id="oc-media-optout" type="button">我现在不方便使用麦克风/摄像头。</button>
+      </div>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
       </div>`;
@@ -914,6 +951,7 @@ function embedHtml(
       <div class="oc-challenge">
         ${challengeBody(state, config, apiVersion)}
       </div>
+      ${accessibilityPanelHtml()}
       <footer class="oc-footer">
         <div class="oc-legal">
           <span class="oc-brand-note">安全验证由 OxygenChallenge 提供</span>
@@ -973,22 +1011,7 @@ function entryHtml(
         <span>Oxygen Challenge</span>
         <button class="oc-entry-accessibility" id="oc-entry-accessibility" type="button" aria-label="无障碍验证"><span class="oc-sr-only">无障碍验证</span></button>
       </div>
-      <section class="oc-accessibility-panel hidden" id="oc-accessibility-panel" role="dialog" aria-modal="true" aria-labelledby="oc-accessibility-title">
-        <h2 id="oc-accessibility-title">选择需要的验证方式</h2>
-        <p>可多选，至少选择一项，最多选择四项。系统只会使用与你可用感官相匹配的题型。</p>
-        <div class="oc-accessibility-options">
-          <label><input type="checkbox" value="vision"> 看不清图像或需要屏幕阅读器</label>
-          <label><input type="checkbox" value="motor"> 不便完成拖拽、精细点击或同时操作键盘鼠标</label>
-          <label><input type="checkbox" value="hearing"> 听不清声音或无法辨别音频</label>
-          <label><input type="checkbox" value="speech"> 不便朗读或说话</label>
-          <label><input type="checkbox" value="cognitive"> 需要更短、更简单的阅读或计算任务</label>
-        </div>
-        <p class="oc-accessibility-hint" id="oc-accessibility-hint">请选择至少一项。</p>
-        <div class="oc-accessibility-actions">
-          <button class="oc-text-button" type="button" id="oc-accessibility-cancel">取消</button>
-          <button class="oc-submit" type="button" id="oc-accessibility-start" disabled>开始适配验证</button>
-        </div>
-      </section>
+      ${accessibilityPanelHtml()}
     </section>
   </main>
 </body>
@@ -1268,8 +1291,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (!site) {
       return reply.code(503).type("text/html").send(errorPage(503, "验证服务尚未配置"));
     }
-    const query = request.query as { launch?: string; accessible?: string };
-    const accessible = query.accessible === "1";
+    const query = request.query as {
+      launch?: string;
+      accessible?: string;
+      accessibilityNeeds?: string;
+    };
+    const accessibilityNeeds = parseAccessibilityNeeds(query.accessibilityNeeds);
+    const accessible = query.accessible === "1" || accessibilityNeeds.length > 0;
     if (query.launch !== "1") {
       reply
         .type("text/html; charset=utf-8")
@@ -1298,6 +1326,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       config.publicOrigin,
       deviceClassFor(request),
       accessible,
+      accessibilityNeeds,
     );
     reply
       .type("text/html; charset=utf-8")
@@ -1553,9 +1582,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (!state) {
       return reply.code(404).send({ swapped: false, code: "CHALLENGE_NOT_FOUND" });
     }
+    const accessibleSwap =
+      parsed.data.accessible || (parsed.data.accessibilityNeeds?.length ?? 0) > 0;
     const result = challenges.swap(
       state.id,
-      parsed.data.accessible,
+      accessibleSwap,
       parsed.data.accessibilityNeeds,
     );
     if (result.kind === "failed") {
@@ -1568,25 +1599,51 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       ? challenges.getSession(result.sessionId)
       : undefined;
     const apiVersion = apiVersionForRequest(request);
+    if (result.state.preview) {
+      const nextEmbedUrl = new URL(`${apiBase(config)}/captcha`);
+      nextEmbedUrl.searchParams.set("launch", "1");
+      if (result.state.accessible) {
+        nextEmbedUrl.searchParams.set("accessible", "1");
+      }
+      if (result.state.accessibilityNeeds?.length) {
+        nextEmbedUrl.searchParams.set(
+          "accessibilityNeeds",
+          result.state.accessibilityNeeds.join(","),
+        );
+      }
+      return {
+        swapped: true,
+        challengeId: result.state.id,
+        preview: true,
+        type: result.state.type,
+        nextEmbedUrl: nextEmbedUrl.toString(),
+      };
+    }
+    const nextEmbedUrl = new URL(`${apiBase(config)}/embed`);
+    nextEmbedUrl.searchParams.set("session", result.sessionId ?? "");
+    nextEmbedUrl.searchParams.set("launch", "1");
+    if (swappedSession?.testMode && config.nodeEnv !== "production") {
+      nextEmbedUrl.searchParams.set("test", "1");
+    }
+    if (accessibleSwap) {
+      nextEmbedUrl.searchParams.set("accessible", "1");
+    }
+    if (parsed.data.accessibilityNeeds?.length) {
+      nextEmbedUrl.searchParams.set(
+        "accessibilityNeeds",
+        parsed.data.accessibilityNeeds.join(","),
+      );
+    }
+    if (apiVersion === "2") {
+      nextEmbedUrl.searchParams.set("apiVersion", "2");
+    }
     return {
       swapped: true,
       challengeId: result.state.id,
-      preview: result.state.preview === true,
+      preview: false,
       type: result.state.type,
-      ...(result.state.preview
-        ? {}
-        : {
-            sessionId: result.sessionId,
-            nextEmbedUrl: `${apiBase(config)}/embed?session=${encodeURIComponent(
-              result.sessionId ?? "",
-            )}&launch=1${
-              swappedSession?.testMode && config.nodeEnv !== "production"
-                ? "&test=1"
-                : ""
-            }${
-              parsed.data.accessible ? "&accessible=1" : ""
-            }${apiVersion === "2" ? "&apiVersion=2" : ""}`,
-          }),
+      sessionId: result.sessionId,
+      nextEmbedUrl: nextEmbedUrl.toString(),
     };
   };
 

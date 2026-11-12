@@ -134,7 +134,7 @@ document.querySelector("oxygen-challenge").reset();
 | `accessible` | `0` 或 `1` |
 | `apiVersion` | `1` 或 `2`；`2` 需要 `clientContext` |
 | `clientContext` | URL 编码后的 JSON；Web Component 自动生成 |
-| `accessibilityNeeds` | 逗号分隔的适配理由，最多四项 |
+| `accessibilityNeeds` | 逗号分隔的适配理由，最多四项；`media` 表示当前不便使用麦克风或摄像头 |
 | `launch` | `0` 默认显示紧凑入口；`1` 直接创建并显示 Challenge |
 | `session` | 服务器生成的会话续页，不应由客户页面自行构造 |
 
@@ -159,8 +159,9 @@ Challenge 页自身允许 MediaPipe 所需的 `'wasm-unsafe-eval'`，客户页�
 - 所有交互控件触控目标不小于 44px。
 - 默认入口为 400×96px 的品牌化矩形，点击热区保持 44px，可见方框为 29px。
 - 图标、刷新和无障碍按钮都有可访问名称与键盘焦点态。
-- 紧凑入口的无障碍按钮会显示可多选的理由面板；至少选择一项、最多四项，不能全选。
+- 紧凑入口和题内无障碍按钮都会显示同一套可多选理由面板；至少选择一项、最多四项，不能全选。
   理由用于选择可用感官匹配的多步骤题型，而不是固定返回同一道题。
+- 摄像头、麦克风题额外显示“我现在不方便使用麦克风/摄像头。”；移动端也可通过该理由换题。
 - 旧版 `accessible=1` 且不提供理由时，仍兼容单步反色题和 DTMF 音频。
 - 风险会话只有在最后一步通过后才写入隐藏 token 字段。
 - 声音题只在用户点击“播放声音”后请求和播放 WAV。

@@ -48,7 +48,8 @@ export type AccessibilityNeed =
   | "motor"
   | "hearing"
   | "speech"
-  | "cognitive";
+  | "cognitive"
+  | "media";
 
 export type ClientContext = {
   timezone: string;
