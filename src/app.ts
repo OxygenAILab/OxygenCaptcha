@@ -39,6 +39,8 @@ import type {
   AppConfig,
   ChallengeState,
   ClientContext,
+  EmbedContext,
+  EmbedTheme,
   HandMotionAction,
 } from "./types.js";
 import { officialSiteHtml } from "./web.js";
@@ -72,10 +74,141 @@ const ACCESSIBILITY_NEEDS = [
   "media",
 ] as const;
 const API_VERSION = "1";
-const API_NEXT_VERSION = "2";
-const SUPPORTED_API_VERSIONS = [API_VERSION, API_NEXT_VERSION] as const;
-const APP_VERSION = "v26.0.3";
-const ASSET_VERSION = "26.0.3";
+const API_V2_VERSION = "2";
+const API_NEXT_VERSION = "4";
+const SUPPORTED_API_VERSIONS = [
+  API_VERSION,
+  API_V2_VERSION,
+  API_NEXT_VERSION,
+] as const;
+const APP_VERSION = "v26.0.4";
+const ASSET_VERSION = "26.0.4";
+
+type ApiVersion = (typeof SUPPORTED_API_VERSIONS)[number];
+
+type RgbColor = { r: number; g: number; b: number };
+
+function parseEmbedColor(value: string): RgbColor | undefined {
+  const normalized = value.trim().toLowerCase();
+  const hex = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+  if (hex?.[1]) {
+    const raw =
+      hex[1].length === 3
+        ? hex[1]
+            .split("")
+            .map((part) => `${part}${part}`)
+            .join("")
+        : hex[1];
+    return {
+      r: Number.parseInt(raw.slice(0, 2), 16),
+      g: Number.parseInt(raw.slice(2, 4), 16),
+      b: Number.parseInt(raw.slice(4, 6), 16),
+    };
+  }
+  const rgb = normalized.match(
+    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(?:1|1\.0+))?\s*\)$/,
+  );
+  if (rgb) {
+    const values = rgb.slice(1, 4).map((part) => Number.parseInt(part ?? "", 10));
+    if (values.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+      return {
+        r: values[0] ?? 0,
+        g: values[1] ?? 0,
+        b: values[2] ?? 0,
+      };
+    }
+  }
+  return undefined;
+}
+
+function colorHex({ r, g, b }: RgbColor): string {
+  return `#${[r, g, b]
+    .map((part) => part.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function relativeLuminance(color: RgbColor): number {
+  const channel = (value: number): number => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    channel(color.r) * 0.2126 +
+    channel(color.g) * 0.7152 +
+    channel(color.b) * 0.0722
+  );
+}
+
+function contrastRatio(left: RgbColor, right: RgbColor): number {
+  const lighter = Math.max(relativeLuminance(left), relativeLuminance(right));
+  const darker = Math.min(relativeLuminance(left), relativeLuminance(right));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function embedThemeFor(context: EmbedContext): {
+  embed: EmbedContext;
+  theme: EmbedTheme;
+} {
+  const rgb = parseEmbedColor(context.backgroundColor) ?? { r: 233, g: 237, b: 243 };
+  const light = { r: 255, g: 255, b: 255 };
+  const dark = { r: 23, g: 32, b: 51 };
+  const mode =
+    contrastRatio(rgb, light) >= contrastRatio(rgb, dark) ? "dark" : "light";
+  const foreground = mode === "dark" ? { r: 245, g: 245, b: 247 } : dark;
+  const backgroundColor = colorHex(rgb);
+  return {
+    embed: {
+      ...context,
+      backgroundColor,
+    },
+    theme: {
+      mode,
+      backgroundColor,
+      foregroundColor: colorHex(foreground),
+      surfaceColor: "#ffffff",
+      textColor: "#172033",
+      mutedTextColor: "#637086",
+      borderColor: "#d7dee9",
+      shadowColor:
+        mode === "dark" ? "rgba(0,0,0,.42)" : "rgba(23,32,51,.12)",
+      contrastRatio: Math.round(contrastRatio(foreground, rgb) * 100) / 100,
+    },
+  };
+}
+
+function embedStyleForContext(embedContext: EmbedContext | undefined): string {
+  if (!embedContext) {
+    return "";
+  }
+  const { embed, theme } = embedThemeFor(embedContext);
+  const padding =
+    embed.placement === "fullscreen"
+      ? 8
+      : embed.placement === "sidebar"
+        ? 12
+        : embed.placement === "modal"
+          ? 20
+          : 16;
+  return [
+    `--oc-embed-bg:${theme.backgroundColor}`,
+    `--oc-embed-fg:${theme.foregroundColor}`,
+    `--oc-embed-surface:${theme.surfaceColor}`,
+    `--oc-embed-text:${theme.textColor}`,
+    `--oc-embed-muted:${theme.mutedTextColor}`,
+    `--oc-embed-border:${theme.borderColor}`,
+    `--oc-embed-shadow:${theme.shadowColor}`,
+    `--oc-embed-radius:${embed.borderRadius ?? 8}px`,
+    `--oc-embed-padding:${padding}px`,
+    `--oc-embed-max-width:${embed.width ?? 420}px`,
+    `color-scheme:${theme.mode}`,
+  ].join(";");
+}
+
+function embedStyleFor(state: ChallengeState): string {
+  return embedStyleForContext(state.embed);
+}
 
 const clientContextSchema = z.object({
   timezone: z.string().trim().min(1).max(64),
@@ -91,6 +224,22 @@ const clientContextSchema = z.object({
   reducedMotion: z.boolean().optional(),
   webdriver: z.boolean().optional(),
   cookiesEnabled: z.boolean().optional(),
+  embed: z
+    .object({
+      backgroundColor: z
+        .string()
+        .trim()
+        .min(4)
+        .max(64)
+        .refine((value) => Boolean(parseEmbedColor(value))),
+      width: z.number().int().min(240).max(1_200).optional(),
+      height: z.number().int().min(72).max(1_200).optional(),
+      borderRadius: z.number().int().min(0).max(32).optional(),
+      placement: z
+        .enum(["inline", "modal", "sidebar", "fullscreen"])
+        .optional(),
+    })
+    .optional(),
   screen: z
     .object({
       width: z.number().min(0).max(32_768),
@@ -188,7 +337,7 @@ const embedSchema = z.object({
   launch: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   accessible: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
   test: z.enum(["0", "1"]).optional().transform((value) => value === "1"),
-  apiVersion: z.enum(["1", "2"]).optional(),
+  apiVersion: z.enum(["1", "2", "4"]).optional(),
   clientContext: z.string().max(4_000).optional(),
   accessibilityNeeds: z.string().max(128).optional(),
 }).refine((value) => Boolean(value.sitekey || value.session), {
@@ -215,27 +364,47 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function normalizeApiVersion(value: string | undefined): ApiVersion | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.startsWith("v") ? value.slice(1) : value;
+  return SUPPORTED_API_VERSIONS.includes(normalized as ApiVersion)
+    ? (normalized as ApiVersion)
+    : undefined;
+}
+
+function apiVersionFromPath(url: string): ApiVersion | undefined {
+  const match = url.match(/^\/(v[124])(?:\/|$)/);
+  return normalizeApiVersion(match?.[1]);
+}
+
 function apiVersionAllowed(request: FastifyRequest): boolean {
   const rawRequested = request.headers["x-oxygen-challenge-api-version"];
   const requested = Array.isArray(rawRequested) ? rawRequested[0] : rawRequested;
   if (requested === undefined) {
     return true;
   }
-  const normalized = requested.startsWith("v") ? requested.slice(1) : requested;
-  return SUPPORTED_API_VERSIONS.includes(normalized as (typeof SUPPORTED_API_VERSIONS)[number]);
+  const normalized = normalizeApiVersion(requested);
+  if (!normalized) {
+    return false;
+  }
+  const pathVersion = apiVersionFromPath(request.url);
+  return pathVersion === undefined || pathVersion === normalized;
 }
 
-function apiVersionForRequest(request: FastifyRequest): "1" | "2" {
-  if (request.url.startsWith("/v2/")) {
-    return "2";
+function apiVersionForRequest(request: FastifyRequest): ApiVersion {
+  const pathVersion = apiVersionFromPath(request.url);
+  if (pathVersion) {
+    return pathVersion;
   }
   const rawRequested = request.headers["x-oxygen-challenge-api-version"];
   const requested = Array.isArray(rawRequested) ? rawRequested[0] : rawRequested;
-  if (requested === undefined) {
-    return "1";
-  }
-  const normalized = requested.startsWith("v") ? requested.slice(1) : requested;
-  return normalized === API_NEXT_VERSION ? "2" : "1";
+  return normalizeApiVersion(requested) ?? API_VERSION;
+}
+
+function apiPrefix(apiVersion: ApiVersion): "v1" | "v2" | "v4" {
+  return `v${apiVersion}`;
 }
 
 function parseClientContext(value: string | undefined): ClientContext | undefined {
@@ -310,15 +479,16 @@ function defaultPublicDir(): string {
 function serializeChallenge(
   state: ChallengeState,
   config: AppConfig,
-  apiVersion: "1" | "2" = "1",
+  apiVersion: ApiVersion = API_VERSION,
 ): Record<string, unknown> {
   const base = apiBase(config);
-  const assetPrefix = apiVersion === "2" ? "v2" : "v1";
+  const assetPrefix = apiPrefix(apiVersion);
   const common = {
     challengeId: state.id,
     type: state.type,
     siteKey: state.siteKey,
     action: state.action,
+    apiVersion,
     sessionId: state.sessionId,
     step: (state.stepIndex ?? 0) + 1,
     totalSteps: state.totalSteps ?? 1,
@@ -328,6 +498,9 @@ function serializeChallenge(
     swapAllowed: state.swapAllowed === true,
     ...(state.accessibilityNeeds?.length
       ? { accessibilityNeeds: state.accessibilityNeeds }
+      : {}),
+    ...(apiVersion === API_NEXT_VERSION && state.embed
+      ? { theme: embedThemeFor(state.embed).theme }
       : {}),
     expiresAt: new Date(state.expiresAt).toISOString(),
     maxAttempts: state.maxAttempts,
@@ -517,11 +690,11 @@ function accessibilityPanelHtml(): string {
 function challengeBody(
   state: ChallengeState,
   config: AppConfig,
-  apiVersion: "1" | "2" = "1",
+  apiVersion: ApiVersion = API_VERSION,
 ): string {
   const id = escapeHtml(state.id);
   const base = escapeHtml(apiBase(config));
-  const assetPrefix = apiVersion === "2" ? "v2" : "v1";
+  const assetPrefix = apiPrefix(apiVersion);
 
   if (state.type === "grid_select" && state.grid) {
     const tiles = state.grid.itemKeys
@@ -915,7 +1088,7 @@ function embedHtml(
   state: ChallengeState,
   config: AppConfig,
   testMode = false,
-  apiVersion: "1" | "2" = "1",
+  apiVersion: ApiVersion = API_VERSION,
 ): string {
   const parentOrigin = state.parentOrigin ?? "";
   return `<!doctype html>
@@ -928,7 +1101,7 @@ function embedHtml(
   ${state.type === "turnstile" ? '<script defer src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>' : ""}
   <script defer src="${escapeHtml(apiBase(config))}/frame.js?v=${ASSET_VERSION}"></script>
 </head>
-<body class="oc-frame" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}" data-bypass="${state.bypass ? "1" : "0"}">
+<body class="oc-frame" style="${embedStyleFor(state)}" data-challenge-type="${escapeHtml(state.type)}" data-test-mode="${testMode ? "1" : "0"}" data-risk="${escapeHtml(state.risk ?? "low")}" data-bypass="${state.bypass ? "1" : "0"}">
   <main class="oc-shell" data-api-version="${apiVersion}" data-challenge-id="${escapeHtml(state.id)}" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(parentOrigin)}" data-preview="${state.preview ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}" data-swap-allowed="${state.swapAllowed ? "1" : "0"}">
     <form class="oc-card" id="oc-form" novalidate>
       <header class="oc-header">
@@ -983,6 +1156,7 @@ function entryHtml(
     accessible: boolean;
     testMode: boolean;
     bypass: boolean;
+    embed?: EmbedContext | undefined;
   },
   config: AppConfig,
 ): string {
@@ -996,7 +1170,7 @@ function entryHtml(
   <link rel="stylesheet" href="${base}/widget.css?v=${ASSET_VERSION}">
   <script defer src="${base}/frame.js?v=${ASSET_VERSION}"></script>
 </head>
-<body class="oc-frame oc-entry-page" data-entry="1" data-challenge-type="entry" data-test-mode="${state.testMode ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}">
+<body class="oc-frame oc-entry-page" style="${embedStyleForContext(state.embed)}" data-entry="1" data-challenge-type="entry" data-test-mode="${state.testMode ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}">
   <main class="oc-shell oc-entry-shell" data-site-key="${escapeHtml(state.siteKey)}" data-action="${escapeHtml(state.action)}" data-session-id="${escapeHtml(state.sessionId ?? "")}" data-parent-origin="${escapeHtml(state.parentOrigin ?? "")}" data-accessible="${state.accessible ? "1" : "0"}" data-bypass="${state.bypass ? "1" : "0"}">
     <section class="oc-entry" aria-label="OxygenChallenge">
       <div class="oc-entry-bar">
@@ -1112,10 +1286,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   }
 
   app.addHook("onSend", async (request, reply, payload) => {
-    if (request.url.startsWith("/v1/") || request.url.startsWith("/v2/")) {
+    const responseApiVersion = apiVersionFromPath(request.url);
+    if (responseApiVersion) {
       reply.header(
         "X-Oxygen-Challenge-API-Version",
-        request.url.startsWith("/v2/") ? API_NEXT_VERSION : API_VERSION,
+        responseApiVersion,
       );
     }
     if (["/widget.js", "/widget.css", "/frame.js"].includes(request.url)) {
@@ -1126,6 +1301,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (
       request.url.startsWith("/v1/challenges") ||
       request.url.startsWith("/v2/challenges") ||
+      request.url.startsWith("/v4/challenges") ||
       request.url.startsWith("/embed")
     ) {
       reply.header("Cache-Control", "no-store, max-age=0");
@@ -1197,7 +1373,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     return reply.code(404).send({ error: "OPENAPI_NOT_FOUND" });
   });
 
-  const metaFor = (apiVersion: string, prefix: "/v1" | "/v2") => ({
+  const metaFor = (apiVersion: ApiVersion, prefix: `/${string}`) => ({
     name: "OxygenChallenge",
     version: APP_VERSION,
     apiVersion,
@@ -1206,8 +1382,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     challengeTypes: CHALLENGE_TYPES,
     riskLevels: RISK_STEPS,
     clientContext: {
-      version: API_NEXT_VERSION,
-      requiredFor: ["/v2/challenges", "/v2/risk/assess"],
+      version: apiVersion === API_VERSION ? API_NEXT_VERSION : apiVersion,
+      requiredFor:
+        apiVersion === API_VERSION
+          ? []
+          : [`${prefix}/challenges`, `${prefix}/risk/assess`],
       fields: [
         "timezone",
         "timezoneOffsetMinutes",
@@ -1222,7 +1401,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         "reducedMotion",
         "webdriver",
         "cookiesEnabled",
+        "embed",
         "screen",
+      ],
+      embedFields: [
+        "backgroundColor",
+        "width",
+        "height",
+        "borderRadius",
+        "placement",
       ],
     },
     endpoints: {
@@ -1232,7 +1419,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       animalSounds: `${prefix}/animal-sounds/:animal.wav`,
       siteverify: `${prefix}/siteverify`,
       embed: "/embed",
-      riskAssess: "/v2/risk/assess",
+      riskAssess: `${prefix}/risk/assess`,
       jwks: "/.well-known/oxygenchallenge/jwks.json",
       health: "/healthz",
     },
@@ -1243,9 +1430,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     nextApiVersion: API_NEXT_VERSION,
   }));
 
-  app.get("/v2/meta", async () => metaFor(API_NEXT_VERSION, "/v2"));
+  app.get("/v2/meta", async () => metaFor(API_V2_VERSION, "/v2"));
+  app.get("/v4/meta", async () => metaFor(API_NEXT_VERSION, "/v4"));
 
-  app.post("/v2/risk/assess", async (request, reply) => {
+  const riskAssessHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    if (!apiVersionAllowed(request)) {
+      return reply.code(400).send({ error: "API_VERSION_MISMATCH" });
+    }
+    const apiVersion = apiVersionForRequest(request);
     const parsed = riskContextSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -1254,6 +1449,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       });
     }
     const clientContext = parsed.data.clientContext as ClientContext;
+    if (
+      apiVersion === API_NEXT_VERSION &&
+      !clientContext.embed?.backgroundColor
+    ) {
+      return reply.code(400).send({
+        error: "EMBED_CONTEXT_REQUIRED",
+        apiVersion,
+        requiredFields: ["clientContext.embed.backgroundColor"],
+      });
+    }
+    const embedTheme = clientContext.embed
+      ? embedThemeFor(clientContext.embed)
+      : undefined;
     const site = getSite(config, parsed.data.siteKey);
     if (!site) {
       return reply.code(404).send({ error: "SITE_NOT_FOUND" });
@@ -1272,7 +1480,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       clientContext,
     );
     return {
-      apiVersion: API_NEXT_VERSION,
+      apiVersion,
       risk: assessment.level,
       score: assessment.score,
       recommendedSteps: RISK_STEPS[assessment.level],
@@ -1282,9 +1490,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         systemLanguage: clientContext.systemLanguage,
         selectedLanguage: clientContext.selectedLanguage,
       },
+      ...(embedTheme ? { theme: embedTheme.theme } : {}),
       assessedAt: new Date().toISOString(),
     };
-  });
+  };
+
+  app.post("/v2/risk/assess", riskAssessHandler);
+  app.post("/v4/risk/assess", riskAssessHandler);
 
   app.get("/captcha", async (request, reply) => {
     const site = config.sites[0];
@@ -1381,7 +1593,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (!parsed.success) {
       return reply.code(400).send({ error: "INVALID_REQUEST", issues: parsed.error.issues });
     }
-    if (apiVersion === "2" && !parsed.data.clientContext) {
+    if (apiVersion !== "1" && !parsed.data.clientContext) {
       return reply.code(400).send({
         error: "CLIENT_CONTEXT_REQUIRED",
         apiVersion,
@@ -1389,6 +1601,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       });
     }
     const clientContext = parsed.data.clientContext as ClientContext | undefined;
+    if (
+      apiVersion === API_NEXT_VERSION &&
+      !clientContext?.embed?.backgroundColor
+    ) {
+      return reply.code(400).send({
+        error: "EMBED_CONTEXT_REQUIRED",
+        apiVersion,
+        requiredFields: ["clientContext.embed.backgroundColor"],
+      });
+    }
 
     const site = getSite(config, parsed.data.siteKey);
     if (!site) {
@@ -1460,6 +1682,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       false,
       Boolean(bypass),
       parsed.data.accessibilityNeeds,
+      clientContext?.embed,
     );
 
     reply.header("X-Oxygen-Challenge-Id", state.id);
@@ -1468,6 +1691,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
 
   app.post("/v1/challenges", createChallengeHandler);
   app.post("/v2/challenges", createChallengeHandler);
+  app.post("/v4/challenges", createChallengeHandler);
 
   const verifyChallengeHandler = async (
     request: FastifyRequest,
@@ -1553,7 +1777,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         nextChallenge,
         nextEmbedUrl: `${apiBase(config)}/embed?session=${encodeURIComponent(result.session.id)}&launch=1${
           result.session.testMode && config.nodeEnv !== "production" ? "&test=1" : ""
-        }${apiVersion === "2" ? "&apiVersion=2" : ""}`,
+        }${apiVersion === API_VERSION ? "" : `&apiVersion=${apiVersion}`}`,
       });
     }
 
@@ -1569,6 +1793,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
 
   app.post("/v1/challenges/:id/verify", verifyChallengeHandler);
   app.post("/v2/challenges/:id/verify", verifyChallengeHandler);
+  app.post("/v4/challenges/:id/verify", verifyChallengeHandler);
 
   const swapChallengeHandler = async (
     request: FastifyRequest,
@@ -1634,8 +1859,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         parsed.data.accessibilityNeeds.join(","),
       );
     }
-    if (apiVersion === "2") {
-      nextEmbedUrl.searchParams.set("apiVersion", "2");
+    if (apiVersion !== API_VERSION) {
+      nextEmbedUrl.searchParams.set("apiVersion", apiVersion);
     }
     return {
       swapped: true,
@@ -1649,6 +1874,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
 
   app.post("/v1/challenges/:id/swap", swapChallengeHandler);
   app.post("/v2/challenges/:id/swap", swapChallengeHandler);
+  app.post("/v4/challenges/:id/swap", swapChallengeHandler);
 
   for (const apiVersion of SUPPORTED_API_VERSIONS) {
     const challengePath = `/v${apiVersion}/challenges/:id`;
@@ -1763,20 +1989,41 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     if (!parsed.success) {
       return reply.code(400).type("text/html").send(errorPage(400, "嵌入参数不完整"));
     }
-    const embedApiVersion =
-      parsed.data.apiVersion ?? (parsed.data.clientContext ? API_NEXT_VERSION : API_VERSION);
     const embeddedClientContext = parseClientContext(parsed.data.clientContext);
+    if (parsed.data.clientContext && !embeddedClientContext) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(errorPage(400, "客户端上下文无效"));
+    }
+    const embedApiVersion =
+      parsed.data.apiVersion ??
+      (embeddedClientContext?.embed
+        ? API_NEXT_VERSION
+        : embeddedClientContext
+          ? API_V2_VERSION
+          : API_VERSION);
     const accessibilityNeeds = parseAccessibilityNeeds(parsed.data.accessibilityNeeds);
     const embedAccessible = parsed.data.accessible || accessibilityNeeds.length > 0;
     if (
-      embedApiVersion === API_NEXT_VERSION &&
+      embedApiVersion !== API_VERSION &&
       !embeddedClientContext &&
       !parsed.data.session
     ) {
       return reply
         .code(400)
         .type("text/html")
-        .send(errorPage(400, "API v2 需要有效的客户端上下文"));
+        .send(errorPage(400, "API v2/v4 需要有效的客户端上下文"));
+    }
+    if (
+      embedApiVersion === API_NEXT_VERSION &&
+      !embeddedClientContext?.embed?.backgroundColor &&
+      !parsed.data.session
+    ) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(errorPage(400, "API v4 需要嵌入位置背景颜色"));
     }
 
     let testMode = parsed.data.test && config.nodeEnv !== "production";
@@ -1789,6 +2036,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       accessible: embedAccessible,
       testMode,
       bypass: false,
+      embed: embeddedClientContext?.embed,
     };
     if (parsed.data.session) {
       const session = challenges.getSession(parsed.data.session);
@@ -1811,6 +2059,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         accessible: embedAccessible || session.accessible,
         testMode,
         bypass: session.bypass,
+        embed: session.embed ?? embeddedClientContext?.embed,
       };
       if (parsed.data.launch) {
         state = challenges.currentState(session.id);
@@ -1844,6 +2093,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         accessible: embedAccessible,
         testMode,
         bypass: Boolean(bypass),
+        embed: embeddedClientContext?.embed,
       };
       if (bypass) {
         request.log.info(
@@ -1891,6 +2141,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         false,
         Boolean(bypass),
         accessibilityNeeds,
+        embeddedClientContext?.embed,
       );
     }
     if (!parsed.data.launch) {
@@ -1956,6 +2207,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
 
   app.post("/v1/siteverify", siteverifyHandler);
   app.post("/v2/siteverify", siteverifyHandler);
+  app.post("/v4/siteverify", siteverifyHandler);
 
   await registerPlatform(app, config, platformStore);
 

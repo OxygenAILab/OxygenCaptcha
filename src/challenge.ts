@@ -24,6 +24,7 @@ import type {
   ChallengeState,
   ChallengeType,
   DeviceClass,
+  EmbedContext,
   HandMotionAction,
   KeyPointerState,
   RiskLevel,
@@ -274,6 +275,7 @@ export class ChallengeStore {
     preview = false,
     bypass = false,
     accessibilityNeeds: AccessibilityNeed[] = [],
+    embed?: EmbedContext,
   ): ChallengeState {
     this.cleanup();
 
@@ -319,6 +321,7 @@ export class ChallengeStore {
       testMode,
       bypass,
       accessibilityNeeds,
+      ...(embed ? { embed } : {}),
       deviceClass,
       swapsRemaining: deviceClass === "desktop" ? 1 : 0,
     };
@@ -340,6 +343,7 @@ export class ChallengeStore {
         preview,
         bypass,
         accessibilityNeeds,
+        embed,
       });
       this.challenges.set(state.id, state);
       session.challengeIds.push(state.id);
@@ -355,6 +359,7 @@ export class ChallengeStore {
     deviceClass: DeviceClass,
     accessible = false,
     accessibilityNeeds: AccessibilityNeed[] = [],
+    embed?: EmbedContext,
   ): ChallengeState {
     this.cleanup();
     const hasAccessibilityNeeds = accessible && accessibilityNeeds.length > 0;
@@ -381,6 +386,7 @@ export class ChallengeStore {
       deviceClass,
       preview: true,
       accessibilityNeeds,
+      embed,
     });
     this.challenges.set(state.id, state);
     return state;
@@ -417,6 +423,7 @@ export class ChallengeStore {
         state.deviceClass ?? "desktop",
         accessible,
         accessibilityNeeds,
+        state.embed,
       );
       for (
         let attempt = 0;
@@ -431,6 +438,7 @@ export class ChallengeStore {
           state.deviceClass ?? "desktop",
           accessible,
           accessibilityNeeds,
+          state.embed,
         );
       }
       return { kind: "swapped", state: replacement };
@@ -470,6 +478,7 @@ export class ChallengeStore {
         accessible && accessibilityNeeds.length > 0
           ? accessibilityNeeds
           : (state.accessibilityNeeds ?? []),
+      embed: state.embed,
     });
     this.challenges.delete(id);
     this.challenges.set(replacement.id, replacement);
@@ -735,6 +744,7 @@ export class ChallengeStore {
     preview: boolean;
     bypass?: boolean;
     accessibilityNeeds?: AccessibilityNeed[];
+    embed?: EmbedContext | undefined;
   }): ChallengeState {
     const common = {
       id: randomBytes(18).toString("base64url"),
@@ -757,6 +767,7 @@ export class ChallengeStore {
       ...(input.accessibilityNeeds?.length
         ? { accessibilityNeeds: input.accessibilityNeeds }
         : {}),
+      ...(input.embed ? { embed: input.embed } : {}),
       swapAllowed:
         input.preview ||
         (input.deviceClass === "desktop" &&

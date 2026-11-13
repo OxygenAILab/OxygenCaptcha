@@ -325,7 +325,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0.3" });
+      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0.4" });
 
       const mismatch = await built.app.inject({
         method: "POST",
@@ -538,6 +538,117 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       });
       expect(nextEmbed.statusCode).toBe(200);
       expect(nextEmbed.body).toContain('data-api-version="2"');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("requires and applies v4 embed background context", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-v4-theme-")),
+    });
+    try {
+      const meta = await built.app.inject({ method: "GET", url: "/v4/meta" });
+      expect(meta.statusCode).toBe(200);
+      expect(meta.json()).toMatchObject({
+        apiVersion: "4",
+        supportedApiVersions: ["1", "2", "4"],
+        endpoints: {
+          challenge: "/v4/challenges",
+          riskAssess: "/v4/risk/assess",
+        },
+        clientContext: {
+          version: "4",
+          requiredFor: ["/v4/challenges", "/v4/risk/assess"],
+        },
+      });
+
+      const baseContext = {
+        timezone: "Asia/Hong_Kong",
+        timezoneOffsetMinutes: -480,
+        systemLanguage: "zh-HK",
+        languages: ["zh-HK", "en"],
+        selectedLanguage: "zh-CN",
+      };
+      const missingEmbed = await built.app.inject({
+        method: "POST",
+        url: "/v4/challenges",
+        headers: { origin: "https://app.test" },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          challengeType: "human_check",
+          clientContext: baseContext,
+        },
+      });
+      expect(missingEmbed.statusCode).toBe(400);
+      expect(missingEmbed.json()).toMatchObject({
+        error: "EMBED_CONTEXT_REQUIRED",
+        requiredFields: ["clientContext.embed.backgroundColor"],
+      });
+
+      const context = {
+        ...baseContext,
+        embed: {
+          backgroundColor: "rgb(17, 34, 51)",
+          width: 420,
+          height: 96,
+          borderRadius: 8,
+          placement: "inline",
+        },
+      };
+      const created = await built.app.inject({
+        method: "POST",
+        url: "/v4/challenges",
+        headers: { origin: "https://app.test" },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          challengeType: "human_check",
+          clientContext: context,
+        },
+      });
+      expect(created.statusCode).toBe(200);
+      expect(created.json()).toMatchObject({
+        apiVersion: "4",
+        type: "human_check",
+        theme: {
+          mode: "dark",
+          backgroundColor: "#112233",
+        },
+      });
+
+      const assessed = await built.app.inject({
+        method: "POST",
+        url: "/v4/risk/assess",
+        headers: { origin: "https://app.test" },
+        payload: {
+          siteKey: "site_test",
+          action: "submit",
+          clientContext: context,
+        },
+      });
+      expect(assessed.statusCode).toBe(200);
+      expect(assessed.json()).toMatchObject({
+        apiVersion: "4",
+        theme: { mode: "dark", backgroundColor: "#112233" },
+      });
+
+      const embedded = await built.app.inject({
+        method: "GET",
+        url:
+          "/embed?sitekey=site_test&action=submit" +
+          "&parentOrigin=https%3A%2F%2Fapp.test" +
+          `&apiVersion=4&challengeType=human_check&launch=1&clientContext=${encodeURIComponent(
+            JSON.stringify(context),
+          )}`,
+      });
+      expect(embedded.statusCode).toBe(200);
+      expect(embedded.body).toContain('data-api-version="4"');
+      expect(embedded.body).toContain("--oc-embed-bg:#112233");
+      expect(embedded.body).toContain("--oc-embed-radius:8px");
     } finally {
       await built.app.close();
     }
@@ -864,7 +975,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       }
       const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
       expect(openapi.statusCode).toBe(200);
-      expect(openapi.body).toContain("version: 26.0.3");
+      expect(openapi.body).toContain("version: 26.0.4");
     } finally {
       await built.app.close();
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import math
 import struct
 import time
@@ -801,6 +802,43 @@ def run_mobile_media_accessibility_check(browser: Browser) -> None:
         page.context.close()
 
 
+def run_v4_embed_theme_check(browser: Browser) -> None:
+    context = {
+        "timezone": "Asia/Hong_Kong",
+        "timezoneOffsetMinutes": -480,
+        "systemLanguage": "zh-HK",
+        "languages": ["zh-HK", "en"],
+        "selectedLanguage": "zh-CN",
+        "embed": {
+            "backgroundColor": "#112233",
+            "width": 420,
+            "height": 96,
+            "borderRadius": 8,
+            "placement": "inline",
+        },
+    }
+    url = (
+        f"{BASE}/embed?sitekey={SITE_KEY}&action=submit"
+        f"&parentOrigin={quote(BASE)}&apiVersion=4&challengeType=human_check"
+        f"&launch=1&clientContext={quote(json.dumps(context, separators=(',', ':')))}"
+    )
+    page, errors = open_page(browser, {"width": 900, "height": 760})
+    try:
+        page.goto(url, wait_until="networkidle")
+        page.locator("#oc-form").wait_for(state="visible")
+        assert page.locator("body").evaluate(
+            "element => getComputedStyle(element).backgroundColor"
+        ) == "rgb(17, 34, 51)"
+        assert page.locator(".oc-card").evaluate(
+            "element => getComputedStyle(element).borderRadius"
+        ) == "8px"
+        assert "--oc-embed-bg:#112233" in page.locator("body").get_attribute("style")
+        assert_no_overflow(page)
+        assert not errors, errors
+    finally:
+        page.context.close()
+
+
 def run_site_checks(browser: Browser) -> None:
     for viewport_name, viewport in (
         ("desktop", {"width": 1440, "height": 900}),
@@ -1172,6 +1210,7 @@ with sync_playwright() as playwright:
     run_market_checks(browser)
     run_basic_checks(browser)
     run_media_checks(browser)
+    run_v4_embed_theme_check(browser)
     run_accessible_check(browser)
     run_mobile_media_accessibility_check(browser)
     run_site_checks(browser)

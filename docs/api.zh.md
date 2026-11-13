@@ -1,14 +1,15 @@
 # OxygenChallenge API
 
-版本：`26.0.3`
+版本：`26.0.4`
 
 ## 先决条件
 
 - 请求源必须在站点 `origins` 白名单中。
-- `POST /v1/challenges` 和 `POST /v2/challenges` 需要浏览器 `Origin` 或 `Referer`。
+- `POST /v1/challenges`、`POST /v2/challenges` 和 `POST /v4/challenges` 需要浏览器
+  `Origin` 或 `Referer`。
 - `POST /v1/siteverify` 只允许客户服务端调用，必须使用站点 secret。
-- 客户端可以选择发送 `X-Oxygen-Challenge-API-Version: 1` 或 `2`；发送不兼容版本时返回
-  `400 API_VERSION_MISMATCH`。`/v1/**` 与 `/v2/**` 响应会分别回传 `1` 与 `2`。
+- 客户端可以选择发送 `X-Oxygen-Challenge-API-Version: 1`、`2` 或 `4`；发送不兼容版本时返回
+  `400 API_VERSION_MISMATCH`。`/v1/**`、`/v2/**`、`/v4/**` 响应会分别回传对应版本。
 - 所有 Challenge 和令牌均为一次性；资源 URL 不应被代理缓存。
 
 ## 创建 Challenge
@@ -65,6 +66,34 @@
 可先返回 `risk`、`score`、`recommendedSteps` 和风险原因，消费者再决定是否创建挑战。
 vNext 创建响应中的资源 URL 会使用 `/v2/challenges/:id/*` 与
 `/v2/animal-sounds/:animal.wav`，与调用方的 API 版本保持一致。
+
+## API v4 嵌入主题
+
+`/v4/challenges`、`/v4/risk/assess` 和 `apiVersion=4` 的 `/embed` 都要求
+`clientContext.embed.backgroundColor`。该颜色必须是 `#RRGGBB`、`#RGB` 或
+不透明的 `rgb(r,g,b)`/`rgba(r,g,b,1)`，用于替换 Challenge 页面自身的淡蓝色背景。
+
+```json
+{
+  "clientContext": {
+    "timezone": "Asia/Shanghai",
+    "timezoneOffsetMinutes": -480,
+    "systemLanguage": "zh-CN",
+    "embed": {
+      "backgroundColor": "#f5f5f7",
+      "width": 420,
+      "height": 96,
+      "borderRadius": 8,
+      "placement": "inline"
+    }
+  }
+}
+```
+
+`placement` 可取 `inline`、`modal`、`sidebar`、`fullscreen`。服务端会将颜色标准化为
+十六进制，并在 v4 Challenge 与风险响应中返回可直接复用的 `theme`：`mode`、
+`backgroundColor`、`foregroundColor`、`surfaceColor`、`textColor`、`mutedTextColor`、
+`borderColor`、`shadowColor` 与 `contrastRatio`。v4 资源 URL 使用 `/v4/challenges/:id/*`。
 
 | 类型 | 交互 |
 |---|---|

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.3
+  version: 26.0.4
   description: Risk-aware CAPTCHA API with v1 compatibility and vNext client-context risk assessment.
   license:
     name: Apache-2.0
@@ -257,6 +257,71 @@ paths:
           description: Site verification result
         "400":
           description: Invalid request
+  /v4/meta:
+    get:
+      operationId: getV4Meta
+      summary: Get API v4 metadata
+      responses:
+        "200":
+          description: API v4 metadata
+        "400":
+          description: Invalid API version header
+  /v4/risk/assess:
+    post:
+      operationId: assessV4Risk
+      summary: Assess request risk with required embed context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RiskContextV4Request"
+      responses:
+        "200":
+          description: Risk assessment with derived embed theme
+        "400":
+          description: Invalid or missing embed context
+        "403":
+          description: Origin or action denied
+  /v4/challenges:
+    post:
+      operationId: createV4Challenge
+      summary: Create a v4 challenge with required embed context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateV4ChallengeRequest"
+      responses:
+        "200":
+          description: Challenge created with a derived theme
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeResponse"
+        "400":
+          description: Invalid request or missing embed context
+        "403":
+          description: Origin or action denied
+  /v4/challenges/{id}/verify:
+    $ref: "#/paths/~1v2~1challenges~1{id}~1verify"
+  /v4/challenges/{id}/swap:
+    $ref: "#/paths/~1v2~1challenges~1{id}~1swap"
+  /v4/challenges/{id}/overlay.svg:
+    $ref: "#/paths/~1v2~1challenges~1{id}~1overlay.svg"
+  /v4/challenges/{id}/audio.wav:
+    $ref: "#/paths/~1v2~1challenges~1{id}~1audio.wav"
+  /v4/challenges/{id}/target.svg:
+    $ref: "#/paths/~1v2~1challenges~1{id}~1target.svg"
+  /v4/challenges/{id}/tile/{index}.svg:
+    $ref: "#/paths/~1v2~1challenges~1{id}~1tile~1{index}.svg"
+  /v4/challenges/{id}/sequence.wav:
+    $ref: "#/paths/~1v2~1challenges~1{id}~1sequence.wav"
+  /v4/animal-sounds/{animal}.wav:
+    $ref: "#/paths/~1v2~1animal-sounds~1{animal}.wav"
+  /v4/siteverify:
+    $ref: "#/paths/~1v2~1siteverify"
   /v1/challenges:
     post:
       operationId: createChallenge
@@ -534,11 +599,11 @@ paths:
           required: false
           schema:
             type: string
-            enum: ["1", "2"]
+            enum: ["1", "2", "4"]
         - in: query
           name: clientContext
           required: false
-          description: JSON-encoded ClientContext. Required for API v2 embeds.
+          description: JSON-encoded ClientContext. Required for v2/v4 embeds; v4 also requires embed.backgroundColor.
           schema:
             type: string
         - in: query
@@ -617,6 +682,9 @@ components:
           type: string
         action:
           type: string
+        apiVersion:
+          type: string
+          enum: ["1", "2", "4"]
           default: submit
         accessible:
           type: boolean
@@ -645,6 +713,75 @@ components:
           properties:
             clientContext:
               $ref: "#/components/schemas/ClientContext"
+    CreateV4ChallengeRequest:
+      allOf:
+        - $ref: "#/components/schemas/CreateChallengeRequest"
+        - type: object
+          required: [clientContext]
+          properties:
+            clientContext:
+              allOf:
+                - $ref: "#/components/schemas/ClientContext"
+                - type: object
+                  required: [embed]
+                  properties:
+                    embed:
+                      $ref: "#/components/schemas/EmbedContext"
+    EmbedContext:
+      type: object
+      required: [backgroundColor]
+      properties:
+        backgroundColor:
+          type: string
+          description: CSS RGB or hex color of the consumer location behind the embed.
+          examples: ["#112233", "rgb(245, 247, 250)"]
+        width:
+          type: integer
+          minimum: 240
+          maximum: 1200
+        height:
+          type: integer
+          minimum: 72
+          maximum: 1200
+        borderRadius:
+          type: integer
+          minimum: 0
+          maximum: 32
+        placement:
+          type: string
+          enum: [inline, modal, sidebar, fullscreen]
+    EmbedTheme:
+      type: object
+      required:
+        - mode
+        - backgroundColor
+        - foregroundColor
+        - surfaceColor
+        - textColor
+        - mutedTextColor
+        - borderColor
+        - shadowColor
+        - contrastRatio
+      properties:
+        mode:
+          type: string
+          enum: [light, dark]
+        backgroundColor:
+          type: string
+        foregroundColor:
+          type: string
+        surfaceColor:
+          type: string
+        textColor:
+          type: string
+        mutedTextColor:
+          type: string
+        borderColor:
+          type: string
+        shadowColor:
+          type: string
+        contrastRatio:
+          type: number
     RiskContextRequest:
       type: object
       required: [siteKey, clientContext]
@@ -658,6 +795,20 @@ components:
           $ref: "#/components/schemas/RiskLevel"
         clientContext:
           $ref: "#/components/schemas/ClientContext"
+    RiskContextV4Request:
+      allOf:
+        - $ref: "#/components/schemas/RiskContextRequest"
+        - type: object
+          required: [clientContext]
+          properties:
+            clientContext:
+              allOf:
+                - $ref: "#/components/schemas/ClientContext"
+                - type: object
+                  required: [embed]
+                  properties:
+                    embed:
+                      $ref: "#/components/schemas/EmbedContext"
     ClientContext:
       type: object
       required: [timezone, timezoneOffsetMinutes, systemLanguage]
@@ -701,6 +852,8 @@ components:
           type: boolean
         cookiesEnabled:
           type: boolean
+        embed:
+          $ref: "#/components/schemas/EmbedContext"
         screen:
           type: object
           properties:
@@ -742,6 +895,8 @@ components:
           type: boolean
         swapAllowed:
           type: boolean
+        theme:
+          $ref: "#/components/schemas/EmbedTheme"
         accessibilityNeeds:
           type: array
           maxItems: 4

@@ -67,7 +67,7 @@ function pageIndex(origin: string): string {
   return `
     <section class="doc-hero doc-hero-secondary">
       <div class="doc-hero-copy">
-        <p class="doc-kicker"><span class="zh">API v1 + vNext</span><span class="en">API v1 + vNext</span></p>
+        <p class="doc-kicker"><span class="zh">API v1 / v2 / v4</span><span class="en">API v1 / v2 / v4</span></p>
         <h2><span class="zh">在几分钟内接入验证</span><span class="en">Add verification in minutes</span></h2>
         <p>
           <span class="zh">OxygenChallenge 同时提供浏览器组件与服务端 JSON API。浏览器负责一次交互，业务后端只需要消费一次性令牌。</span>
@@ -105,6 +105,8 @@ function pageIndex(origin: string): string {
         <div><code>POST /v1/challenges</code><span><span class="zh">创建挑战或风险会话</span><span class="en">Create a challenge or risk session</span></span></div>
         <div><code>POST /v2/challenges</code><span><span class="zh">带时区、系统语言与用户选择语言的 vNext 会话</span><span class="en">vNext session with timezone, system language, and user-selected language</span></span></div>
         <div><code>POST /v2/risk/assess</code><span><span class="zh">在创建挑战前评估风险</span><span class="en">Assess risk before creating a challenge</span></span></div>
+        <div><code>POST /v4/challenges</code><span><span class="zh">带嵌入背景主题的 API v4 会话</span><span class="en">API v4 session with embed background theme</span></span></div>
+        <div><code>POST /v4/risk/assess</code><span><span class="zh">评估风险并返回可复用主题</span><span class="en">Assess risk and return a reusable theme</span></span></div>
         <div><code>POST /v1/challenges/:id/verify</code><span><span class="zh">提交交互证据</span><span class="en">Submit interaction evidence</span></span></div>
         <div><code>POST /v1/siteverify</code><span><span class="zh">消费一次性验证令牌</span><span class="en">Consume a one-time verification token</span></span></div>
         <div><code>GET /embed</code><span><span class="zh">服务端渲染嵌入式验证</span><span class="en">Server-rendered embeddable verification</span></span></div>
@@ -154,7 +156,8 @@ function pageEmbed(origin: string): string {
         <div><code>challenge-type</code><span><span class="zh">固定题型，仅用于开发与测试。</span><span class="en">Pin a challenge type for development and testing only.</span></span></div>
         <div><code>accessible</code><span><span class="zh">设为 <code>true</code> 时保留兼容替代；入口和题内面板都会收集至少一项、最多四项适配理由。</span><span class="en">Set to <code>true</code> for the compatibility alternative; entry and in-challenge panels collect one to four accessibility reasons.</span></span></div>
         <div><code>media</code><span><span class="zh">无障碍理由中表示当前不便使用麦克风或摄像头；移动端媒体题也可据此换题。</span><span class="en">An accessibility reason for camera or microphone unavailability, including mobile media challenges.</span></span></div>
-        <div><code>api-version</code><span><span class="zh">默认 <code>2</code>，上报 vNext 客户端上下文；设为 <code>1</code> 回退旧版。</span><span class="en">Defaults to <code>2</code> and reports vNext context; set <code>1</code> for legacy.</span></span></div>
+        <div><code>api-version</code><span><span class="zh">默认 <code>2</code>；设为 <code>4</code> 时需要同时提供背景色，设为 <code>1</code> 回退旧版。</span><span class="en">Defaults to <code>2</code>; set <code>4</code> with a background color, or <code>1</code> for legacy.</span></span></div>
+        <div><code>background-color</code><span><span class="zh">API v4 必填；使用消费端嵌入位置的背景色替换淡蓝背景。</span><span class="en">Required for API v4; replaces the pale-blue challenge background.</span></span></div>
         <div><code>user-language</code><span><span class="zh">消费端用户选择的界面语言，不是浏览器默认语言。</span><span class="en">Customer-selected interface language, not the browser default.</span></span></div>
         <div><code>name</code><span><span class="zh">隐藏字段名，默认 <code>oxygen-token</code>。</span><span class="en">Hidden input name, defaults to <code>oxygen-token</code>.</span></span></div>
       </div>
@@ -211,8 +214,8 @@ function pageIntegration(origin: string): string {
   return `
     <section class="doc-section">
       <div class="doc-section-head">
-        <h2><span class="zh">vNext 风险上下文</span><span class="en">vNext risk context</span></h2>
-        <p><span class="zh">API vNext 要求创建挑战时提供 <code>clientContext</code>，并建议消费端传入用户实际选择的语言。Web Component 默认自动收集。</span><span class="en">API vNext requires <code>clientContext</code> when creating a challenge and expects the customer-selected user language. The Web Component collects it by default.</span></p>
+        <h2><span class="zh">API v4 嵌入主题</span><span class="en">API v4 embed theme</span></h2>
+        <p><span class="zh">API v4 要求 <code>clientContext.embed.backgroundColor</code>，并可提供宽高、圆角与放置模式。服务端返回规范化后的主题 token。</span><span class="en">API v4 requires <code>clientContext.embed.backgroundColor</code>, with optional dimensions, radius, and placement. The API returns normalized theme tokens.</span></p>
       </div>
       <pre><code>{
   "siteKey": "oc_your_site_key",

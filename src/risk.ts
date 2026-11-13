@@ -327,6 +327,24 @@ export class RiskTracker {
         score += 2;
         reasons.push("cookies-disabled");
       }
+      if (clientContext.embed) {
+        const { embed, screen: screenInfo } = clientContext;
+        if (
+          screenInfo &&
+          ((embed.width !== undefined && embed.width > screenInfo.width + 80) ||
+            (embed.height !== undefined && embed.height > screenInfo.height + 80))
+        ) {
+          score += 4;
+          reasons.push("embed-bounds-outlier");
+        }
+        if (
+          embed.placement === "fullscreen" &&
+          (embed.width ?? 0) < 600
+        ) {
+          score += 3;
+          reasons.push("embed-placement-mismatch");
+        }
+      }
       if (
         clientContext.screen &&
         (clientContext.screen.width <= 0 ||

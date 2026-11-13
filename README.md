@@ -1,6 +1,6 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0.3` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0.4` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
 一次性验证令牌、vNext 风险上下文、风险会话和十五类交互挑战：
 
@@ -108,6 +108,13 @@ python tests/browser_smoke.py
 | `GET` | `/v2/animal-sounds/:animal.wav` | v2 动物声音试听别名 |
 | `POST` | `/v2/siteverify` | vNext 服务端消费一次性令牌 |
 | `POST` | `/v2/risk/assess` | 基于浏览器上下文评估风险 |
+| `GET` | `/v4/meta` | API v4 元信息 |
+| `POST` | `/v4/challenges` | 创建带嵌入位置主题上下文的 v4 Challenge |
+| `POST` | `/v4/challenges/:id/verify` | v4 提交答案或交互证据 |
+| `POST` | `/v4/challenges/:id/swap` | v4 换题或无障碍适配 |
+| `GET` | `/v4/challenges/:id/*` | v4 资源别名（SVG、WAV） |
+| `POST` | `/v4/risk/assess` | 评估风险并返回背景主题 |
+| `POST` | `/v4/siteverify` | v4 服务端消费一次性令牌 |
 | `GET` | `/healthz` | 健康检查 |
 | `GET` | `/platform` | OxygenAccount 开放平台 |
 | `GET` | `/docs` | 在线开发文档与接入示例 |

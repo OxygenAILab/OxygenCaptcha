@@ -31,7 +31,7 @@ const DOCUMENTS = {
           bullets: [
             "交互与验证信息：挑战类型和步骤、答案或选择、鼠标或触摸轨迹、按键状态、覆盖与停留时长、交易模拟记录、验证结果和时间戳。",
             "设备与请求信息：浏览器类型、User-Agent、Client Hints、操作系统版本、语言、屏幕与输入能力、公网 IP、请求时间、来源页面、设备和能力一致性信号。",
-            "vNext 客户端上下文：时区与 UTC 偏移、系统语言、语言偏好列表、消费端选择的界面语言、颜色模式、减少动态效果设置、屏幕尺寸、并发能力、设备内存、触控点数、Cookie 状态与自动化浏览器标志。",
+            "vNext 客户端上下文：时区与 UTC 偏移、系统语言、语言偏好列表、消费端选择的界面语言、颜色模式、减少动态效果设置、屏幕尺寸、并发能力、设备内存、触控点数、Cookie 状态、自动化浏览器标志，以及嵌入位置背景色、宽度、高度、圆角和放置模式。",
             "安全与风险信息：Cloudflare 提供的网络与国家/地区元数据、请求频率、自动化特征、内部风险评分、异常轮换信号和验证事件日志。",
             "OxygenAccount 开发者资料：登录开放平台时，依据已授权 scope 接收账号标识、昵称、头像、邮箱以及必要的账户类型判断结果。",
             "应用与配置信息：应用名称、site key、允许的 origin/action、加密保存的 secret、开发 IP 免验证规则及到期时间。",
@@ -162,6 +162,7 @@ const DOCUMENTS = {
             "根据业务风险设计验证触发和二次验证，不得把 CAPTCHA 作为高影响决策的唯一证据。",
             "应为摄像头、麦克风、Cookie、localStorage 和其他数据处理提供适用法律要求的通知与同意。",
             "通过 API vNext 传入客户端时区、系统语言、屏幕/能力信号和用户选择语言时，应保证来源与含义真实，不得伪造或代填终端用户选择。",
+            "通过 API v4 传入嵌入位置背景色、尺寸、圆角或放置模式时，应保证其与实际展示位置一致，不得借主题字段注入任意 CSS、URL 或未经校验的内容。",
             "无障碍理由应由实际受挑战用户选择；客户不得代替用户勾选、强迫选择不准确理由或利用无障碍模式规避安全控制。",
             "应遵守 API 版本、弃用、速率限制、origin 白名单和无障碍要求，并为终端用户提供可用的替代验证路径。",
           ],
@@ -270,7 +271,7 @@ const DOCUMENTS = {
           bullets: [
             "Interaction and verification data: challenge type and step, answers or selections, pointer or touch paths, key state, coverage and dwell duration, simulated trade records, verification results, and timestamps.",
             "Device and request data: browser and User-Agent, Client Hints, operating-system version, language, screen and input capabilities, public IP address, request time, referring page, and device-capability consistency signals.",
-            "vNext client context: timezone and UTC offset, system language, language-preference list, customer-selected interface language, color scheme, reduced-motion preference, screen size, concurrency, device memory, touch points, cookie state, and browser-automation indicators.",
+            "vNext client context: timezone and UTC offset, system language, language-preference list, customer-selected interface language, color scheme, reduced-motion preference, screen size, concurrency, device memory, touch points, cookie state, browser-automation indicators, and embed background color, dimensions, radius, and placement.",
             "Security and risk data: network and country/region metadata supplied by Cloudflare, request frequency, automation indicators, internal risk scores, abnormal rotation signals, and verification event logs.",
             "OxygenAccount developer data: when you sign in to the Open Platform, the account identifier, display name, avatar, email, and necessary account-type determination permitted by approved scopes.",
             "Application and configuration data: application name, site key, allowed origins/actions, encrypted site secret, development IP bypass rules, and expiration times.",
@@ -401,6 +402,7 @@ const DOCUMENTS = {
             "Design verification triggers and secondary checks for your business risk; do not use CAPTCHA as the sole evidence for high-impact decisions.",
             "Provide notices and obtain consent for camera, microphone, cookies, localStorage, and other processing where required by law.",
             "When supplying vNext timezone, system-language, screen/capability, or user-selected-language data, ensure its source and meaning are accurate and do not fabricate or substitute the end user's choice.",
+            "When supplying API v4 embed background color, dimensions, radius, or placement, ensure they match the actual presentation location and do not use theme fields to inject arbitrary CSS, URLs, or unvalidated content.",
             "Accessibility reasons must be selected by the person attempting verification; Customers must not prefill inaccurate reasons or use accessibility mode to evade security controls.",
             "Follow API versions, deprecation notices, rate limits, origin allowlists, and accessibility requirements, and provide a usable alternative verification path.",
           ],

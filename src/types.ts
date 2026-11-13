@@ -51,6 +51,28 @@ export type AccessibilityNeed =
   | "cognitive"
   | "media";
 
+export type EmbedPlacement = "inline" | "modal" | "sidebar" | "fullscreen";
+
+export type EmbedContext = {
+  backgroundColor: string;
+  width?: number;
+  height?: number;
+  borderRadius?: number;
+  placement?: EmbedPlacement;
+};
+
+export type EmbedTheme = {
+  mode: "light" | "dark";
+  backgroundColor: string;
+  foregroundColor: string;
+  surfaceColor: string;
+  textColor: string;
+  mutedTextColor: string;
+  borderColor: string;
+  shadowColor: string;
+  contrastRatio: number;
+};
+
 export type ClientContext = {
   timezone: string;
   timezoneOffsetMinutes: number;
@@ -65,6 +87,7 @@ export type ClientContext = {
   reducedMotion?: boolean;
   webdriver?: boolean;
   cookiesEnabled?: boolean;
+  embed?: EmbedContext;
   screen?: {
     width: number;
     height: number;
@@ -285,6 +308,7 @@ export type ChallengeState = {
   preview?: boolean;
   bypass?: boolean;
   accessibilityNeeds?: AccessibilityNeed[];
+  embed?: EmbedContext;
   deviceClass?: DeviceClass;
   swapAllowed?: boolean;
   parentOrigin: string | null;
@@ -332,6 +356,7 @@ export type ChallengeSessionState = {
   testMode: boolean;
   bypass: boolean;
   accessibilityNeeds: AccessibilityNeed[];
+  embed?: EmbedContext;
   deviceClass: DeviceClass;
   swapsRemaining: number;
 };

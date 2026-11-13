@@ -1,4 +1,5 @@
 import oxygenMarkUrl from "../../public/oxygenmark.png";
+import type { EmbedContext, EmbedPlacement } from "../types.js";
 
 const WIDGET_SOURCE = "oxygenchallenge";
 
@@ -12,6 +13,26 @@ function scriptOrigin(): string {
 
 const SOURCE_ORIGIN = scriptOrigin();
 const verifiedTokens = new Map<string, string>();
+
+function resolvedBackgroundColor(element: HTMLElement): string {
+  let current: HTMLElement | null = element.parentElement;
+  while (current) {
+    const color = getComputedStyle(current).backgroundColor;
+    if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)") {
+      return color;
+    }
+    current = current.parentElement;
+  }
+  const rootColor = getComputedStyle(document.documentElement).backgroundColor;
+  return rootColor && rootColor !== "transparent" && rootColor !== "rgba(0, 0, 0, 0)"
+    ? rootColor
+    : "#ffffff";
+}
+
+function numberAttribute(element: HTMLElement, name: string): number | undefined {
+  const value = Number.parseFloat(element.getAttribute(name) ?? "");
+  return Number.isFinite(value) ? value : undefined;
+}
 
 function tokenIsUsable(token: string): boolean {
   const parts = token.split(".");
@@ -34,7 +55,10 @@ function tokenIsUsable(token: string): boolean {
   }
 }
 
-function collectClientContext(selectedLanguage: string): Record<string, unknown> {
+function collectClientContext(
+  selectedLanguage: string,
+  embed?: EmbedContext,
+): Record<string, unknown> {
   const navigatorWithHints = navigator as Navigator & {
     deviceMemory?: number;
     webdriver?: boolean;
@@ -58,6 +82,7 @@ function collectClientContext(selectedLanguage: string): Record<string, unknown>
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     webdriver: navigatorWithHints.webdriver === true,
     cookiesEnabled: navigator.cookieEnabled,
+    ...(embed ? { embed } : {}),
     screen: {
       width: screen.width,
       height: screen.height,
@@ -207,18 +232,46 @@ class OxygenChallengeElement extends HTMLElement {
     const accessible = this.getAttribute("accessible");
     const risk = this.getAttribute("risk");
     const steps = this.getAttribute("steps");
-    const apiVersion = this.getAttribute("api-version") === "1" ? "1" : "2";
+    const requestedApiVersion = this.getAttribute("api-version");
+    const apiVersion =
+      requestedApiVersion === "1"
+        ? "1"
+        : requestedApiVersion === "4"
+          ? "4"
+          : "2";
     const selectedLanguage =
       this.getAttribute("user-language") ?? document.documentElement.lang;
+    const backgroundColor =
+      this.getAttribute("background-color") ??
+      this.getAttribute("embed-background-color") ??
+      resolvedBackgroundColor(this);
+    const borderRadius = numberAttribute(this, "embed-radius");
+    const placement = this.getAttribute("embed-placement");
+    const embed: EmbedContext | undefined =
+      apiVersion === "4"
+        ? {
+            backgroundColor,
+            width:
+              numberAttribute(this, "embed-width") ??
+              Math.max(240, Math.round(this.clientWidth || 400)),
+            height:
+              numberAttribute(this, "embed-height") ??
+              Math.max(72, Math.round(this.clientHeight || 96)),
+            ...(borderRadius !== undefined ? { borderRadius } : {}),
+            ...(placement
+              ? { placement: placement as EmbedPlacement }
+              : {}),
+          }
+        : undefined;
     const url = new URL("/embed", this.sourceOrigin);
     url.searchParams.set("sitekey", siteKey);
     url.searchParams.set("action", action);
     url.searchParams.set("parentOrigin", location.origin);
     url.searchParams.set("apiVersion", apiVersion);
-    if (apiVersion === "2") {
+    if (apiVersion !== "1") {
       url.searchParams.set(
         "clientContext",
-        JSON.stringify(collectClientContext(selectedLanguage)),
+        JSON.stringify(collectClientContext(selectedLanguage, embed)),
       );
     }
     if (
