@@ -325,7 +325,11 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       const meta = await built.app.inject({ method: "GET", url: "/v1/meta" });
       expect(meta.statusCode).toBe(200);
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
-      expect(meta.json()).toMatchObject({ apiVersion: "1", version: "v26.0.4" });
+      expect(meta.json()).toMatchObject({
+        apiVersion: "1",
+        version: "v26.0.4",
+        endpoints: { riskAssess: "/v4/risk/assess" },
+      });
 
       const mismatch = await built.app.inject({
         method: "POST",

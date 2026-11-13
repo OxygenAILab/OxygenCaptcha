@@ -1419,7 +1419,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       animalSounds: `${prefix}/animal-sounds/:animal.wav`,
       siteverify: `${prefix}/siteverify`,
       embed: "/embed",
-      riskAssess: `${prefix}/risk/assess`,
+      riskAssess:
+        apiVersion === API_VERSION ? "/v4/risk/assess" : `${prefix}/risk/assess`,
       jwks: "/.well-known/oxygenchallenge/jwks.json",
       health: "/healthz",
     },
