@@ -88,5 +88,8 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
   紧凑完成态改用真实 Oxygen Logo 的内嵌 PNG。
 - 2026-11-13：`v26.0.4` 升级 API v4；新增必填的嵌入位置背景色、尺寸、圆角和
   放置模式上下文，服务端推导主题 token 并替换 Challenge 页面默认淡蓝背景。
+- 2026-11-15：为 PrimaLauncher 本地开发补齐 `oc_account_oxygenai_top` 的受控来源
+  `http://127.0.0.1:4317` 与 `http://localhost:4317`。生产 `/embed` 对两个来源返回
+  200，未授权来源仍返回 403；PrimaLauncher 的 Web Component iframe 已完成实测。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->
