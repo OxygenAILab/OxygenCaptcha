@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import type { ClientContext, RiskLevel } from "./types.js";
+import { RISK_STEPS, type ClientContext, type RiskLevel } from "./types.js";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -10,13 +10,51 @@ export type RiskRequest = {
 
 export type RiskAssessment = {
   level: RiskLevel;
+  band: number;
   score: number;
+  recommendedSteps: number;
+  requestedSteps: number;
+  policyVersion: string;
+  signals: RiskSignalScores;
   reasons: string[];
   ip: string;
   country?: string;
   userAgent: string;
   platform?: string;
   system: string;
+};
+
+export type RiskSignalScores = {
+  automation: number;
+  environment: number;
+  reputation: number;
+  embedding: number;
+};
+
+export const RISK_POLICY_VERSION = "2026-11-24.1";
+
+export const RISK_BANDS = [
+  { band: 1, minScore: 0, maxScore: 11, level: "low", steps: 1 },
+  { band: 2, minScore: 12, maxScore: 24, level: "low", steps: 2 },
+  { band: 3, minScore: 25, maxScore: 37, level: "medium", steps: 3 },
+  { band: 4, minScore: 38, maxScore: 49, level: "medium", steps: 4 },
+  { band: 5, minScore: 50, maxScore: 62, level: "high", steps: 5 },
+  { band: 6, minScore: 63, maxScore: 74, level: "high", steps: 6 },
+  { band: 7, minScore: 75, maxScore: 87, level: "critical", steps: 7 },
+  { band: 8, minScore: 88, maxScore: 100, level: "critical", steps: 8 },
+] as const satisfies ReadonlyArray<{
+  band: number;
+  minScore: number;
+  maxScore: number;
+  level: RiskLevel;
+  steps: number;
+}>;
+
+export const RISK_CATEGORY_CAPS: RiskSignalScores = {
+  automation: 65,
+  environment: 25,
+  reputation: 20,
+  embedding: 10,
 };
 
 type RiskRecord = {
@@ -62,17 +100,19 @@ export function clientIp(request: RiskRequest): string {
   return candidates.find((candidate) => isIP(candidate) !== 0) ?? request.ip;
 }
 
+export function riskBandFromScore(score: number): number {
+  const normalized = Math.max(0, Math.min(100, score));
+  for (let index = RISK_BANDS.length - 1; index >= 0; index -= 1) {
+    const band = RISK_BANDS[index];
+    if (band && normalized >= band.minScore) {
+      return band.band;
+    }
+  }
+  return 1;
+}
+
 export function riskFromScore(score: number): RiskLevel {
-  if (score >= 70) {
-    return "critical";
-  }
-  if (score >= 45) {
-    return "high";
-  }
-  if (score >= 20) {
-    return "medium";
-  }
-  return "low";
+  return RISK_BANDS[riskBandFromScore(score) - 1]?.level ?? "low";
 }
 
 export function maxRisk(left: RiskLevel, right: RiskLevel): RiskLevel {
@@ -169,6 +209,16 @@ const COUNTRY_TIMEZONE_AREA: Record<string, string> = {
   US: "America",
 };
 
+function platformFamily(value: string | undefined): string | undefined {
+  const normalized = value?.toLowerCase() ?? "";
+  if (/windows|win32|win64/.test(normalized)) return "windows";
+  if (/android/.test(normalized)) return "android";
+  if (/iphone|ipad|ios/.test(normalized)) return "ios";
+  if (/macintosh|macos|mac os/.test(normalized)) return "macos";
+  if (/linux/.test(normalized)) return "linux";
+  return undefined;
+}
+
 export class RiskTracker {
   private readonly records = new Map<string, RiskRecord>();
 
@@ -193,96 +243,102 @@ export class RiskTracker {
       userAgents: new Set<string>(),
     };
     const reasons: string[] = [];
-    let score = 0;
+    const signals: RiskSignalScores = {
+      automation: 0,
+      environment: 0,
+      reputation: 0,
+      embedding: 0,
+    };
+    const add = (
+      group: keyof RiskSignalScores,
+      points: number,
+      reason: string,
+    ): void => {
+      signals[group] += points;
+      reasons.push(reason);
+    };
 
     if (!userAgent) {
-      score += 28;
-      reasons.push("missing-user-agent");
-    } else if (/(headless|phantomjs|electron\/|playwright|puppeteer)/i.test(userAgent)) {
-      score += 35;
-      reasons.push("automation-user-agent");
+      add("automation", 22, "missing-user-agent");
+    } else if (/(headless|phantomjs|playwright|puppeteer)/i.test(userAgent)) {
+      add("automation", 45, "automation-user-agent");
     } else if (/(bot|crawler|spider|curl|wget|python-requests|postmanruntime|go-http-client)/i.test(userAgent)) {
-      score += 32;
-      reasons.push("bot-user-agent");
+      add("automation", 42, "bot-user-agent");
+    } else if (/electron\//i.test(userAgent)) {
+      add("environment", 4, "desktop-shell-runtime");
     }
 
     const language = header(request.headers, "accept-language");
     if (!language) {
-      score += 8;
-      reasons.push("missing-language");
+      add("automation", 6, "missing-language");
     }
     if (!header(request.headers, "accept")) {
-      score += 5;
-      reasons.push("missing-accept");
+      add("automation", 4, "missing-accept");
     }
     if (!header(request.headers, "sec-fetch-mode")) {
-      score += 6;
-      reasons.push("missing-fetch-metadata");
+      add("automation", 6, "missing-fetch-metadata");
     }
 
     const chromium = /(Chrome|Chromium|Edg)\//i.test(userAgent);
     if (chromium && !header(request.headers, "sec-ch-ua")) {
-      score += 8;
-      reasons.push("missing-client-hints");
+      add("automation", 7, "missing-client-hints");
     }
-    if (platform && /Windows/i.test(userAgent) && !/Windows/i.test(platform)) {
-      score += 16;
-      reasons.push("platform-mismatch");
+    const headerPlatformFamily = platformFamily(platform);
+    const uaPlatformFamily = platformFamily(userAgent);
+    if (
+      headerPlatformFamily &&
+      uaPlatformFamily &&
+      headerPlatformFamily !== uaPlatformFamily
+    ) {
+      add("environment", 12, "platform-mismatch");
     }
     const mobileHint = header(request.headers, "sec-ch-ua-mobile");
     if (mobileHint && /Mobile/.test(userAgent) !== (mobileHint === "?1")) {
-      score += 7;
-      reasons.push("mobile-hint-mismatch");
+      add("environment", 6, "mobile-hint-mismatch");
     }
     if (/Windows NT (5|6\.0|6\.1|6\.2|6\.3)/.test(userAgent)) {
-      score += 9;
-      reasons.push("legacy-windows");
+      add("environment", 8, "legacy-windows");
     }
     if (/Android ([0-9]|10)(\.|;|\))/.test(userAgent)) {
-      score += 6;
-      reasons.push("legacy-android");
+      add("environment", 6, "legacy-android");
     }
     const chromeVersion = userAgent.match(/(?:Chrome|Chromium|Edg)\/(\d+)/);
     if (chromeVersion && Number.parseInt(chromeVersion[1] ?? "999", 10) < 100) {
-      score += 8;
-      reasons.push("legacy-browser");
+      add("environment", 7, "legacy-browser");
     }
     if (production && !isPrivateIp(ip) && !country) {
-      score += 6;
-      reasons.push("missing-cloudflare-country");
+      add("environment", 5, "missing-cloudflare-country");
     }
-    if (country && language && /^zh/i.test(country) && !/^zh/i.test(language)) {
-      score += 3;
-      reasons.push("country-language-weak-mismatch");
+    if (
+      country &&
+      language &&
+      ["CN", "HK", "MO", "TW", "SG"].includes(country) &&
+      !/^zh/i.test(language)
+    ) {
+      add("environment", 2, "country-language-weak-mismatch");
     }
 
     if (clientContext) {
       if (clientContext.webdriver) {
-        score += 65;
-        reasons.push("webdriver-detected");
+        add("automation", 60, "webdriver-detected");
       }
       if (!validTimezone(clientContext.timezone)) {
-        score += 10;
-        reasons.push("invalid-timezone");
+        add("environment", 9, "invalid-timezone");
       } else if (
         /^UTC$|^Etc\/UTC$|^Etc\/Unknown$/i.test(clientContext.timezone)
       ) {
-        score += 4;
-        reasons.push("generic-timezone");
+        add("environment", 3, "generic-timezone");
       }
       const expectedArea = country ? COUNTRY_TIMEZONE_AREA[country] : undefined;
       const timezoneArea = clientContext.timezone.split("/")[0];
       if (expectedArea && timezoneArea && timezoneArea !== expectedArea) {
-        score += 5;
-        reasons.push("country-timezone-mismatch");
+        add("environment", 5, "country-timezone-mismatch");
       }
       if (!clientContext.systemLanguage) {
-        score += 8;
-        reasons.push("missing-system-language");
+        add("environment", 7, "missing-system-language");
       }
       if (!clientContext.languages?.length) {
-        score += 3;
-        reasons.push("missing-language-list");
+        add("environment", 3, "missing-language-list");
       }
       const selectedLanguage = clientContext.selectedLanguage?.toLowerCase();
       const systemLanguage = clientContext.systemLanguage?.toLowerCase();
@@ -295,12 +351,10 @@ export class RiskTracker {
             candidate.toLowerCase().split("-")[0] === selectedLanguage.split("-")[0],
         )
       ) {
-        score += 5;
-        reasons.push("selected-language-mismatch");
+        add("environment", 4, "selected-language-mismatch");
       }
       if ((clientContext.languages?.length ?? 0) > 8) {
-        score += 5;
-        reasons.push("excessive-language-list");
+        add("environment", 4, "excessive-language-list");
       }
       const observedOffset = validTimezone(clientContext.timezone)
         ? timezoneOffsetMinutesEast(clientContext.timezone)
@@ -309,23 +363,25 @@ export class RiskTracker {
         observedOffset !== undefined &&
         Math.abs(observedOffset + clientContext.timezoneOffsetMinutes) > 30
       ) {
-        score += 6;
-        reasons.push("timezone-offset-mismatch");
+        add("environment", 6, "timezone-offset-mismatch");
       }
-      const platform = clientContext.platform?.toLowerCase() ?? "";
+      const contextPlatformFamily = platformFamily(clientContext.platform);
       if (
-        platform &&
-        ((platform.includes("win") && !/windows/i.test(userAgent)) ||
-          (platform.includes("android") && !/android/i.test(userAgent)) ||
-          ((platform.includes("iphone") || platform.includes("ipad")) &&
-            !/iphone|ipad|ios/i.test(userAgent)))
+        contextPlatformFamily &&
+        uaPlatformFamily &&
+        contextPlatformFamily !== uaPlatformFamily
       ) {
-        score += 5;
-        reasons.push("client-platform-mismatch");
+        add("environment", 5, "client-platform-mismatch");
+      }
+      if (
+        contextPlatformFamily &&
+        headerPlatformFamily &&
+        contextPlatformFamily !== headerPlatformFamily
+      ) {
+        add("environment", 6, "client-header-platform-mismatch");
       }
       if (clientContext.cookiesEnabled === false) {
-        score += 2;
-        reasons.push("cookies-disabled");
+        add("environment", 2, "cookies-disabled");
       }
       if (clientContext.embed) {
         const { embed, screen: screenInfo } = clientContext;
@@ -334,15 +390,13 @@ export class RiskTracker {
           ((embed.width !== undefined && embed.width > screenInfo.width + 80) ||
             (embed.height !== undefined && embed.height > screenInfo.height + 80))
         ) {
-          score += 4;
-          reasons.push("embed-bounds-outlier");
+          add("embedding", 4, "embed-bounds-outlier");
         }
         if (
           embed.placement === "fullscreen" &&
           (embed.width ?? 0) < 600
         ) {
-          score += 3;
-          reasons.push("embed-placement-mismatch");
+          add("embedding", 3, "embed-placement-mismatch");
         }
       }
       if (
@@ -354,46 +408,38 @@ export class RiskTracker {
           clientContext.screen.pixelRatio <= 0 ||
           clientContext.screen.pixelRatio > 8)
       ) {
-        score += 7;
-        reasons.push("implausible-screen");
+        add("environment", 6, "implausible-screen");
       }
       if (
         clientContext.hardwareConcurrency !== undefined &&
         (clientContext.hardwareConcurrency <= 0 ||
           clientContext.hardwareConcurrency > 128)
       ) {
-        score += 6;
-        reasons.push("implausible-hardware");
+        add("environment", 5, "implausible-hardware");
       }
       if (
         clientContext.deviceMemory !== undefined &&
         (clientContext.deviceMemory <= 0 || clientContext.deviceMemory > 128)
       ) {
-        score += 5;
-        reasons.push("implausible-device-memory");
+        add("environment", 4, "implausible-device-memory");
       }
       if ((clientContext.touchPoints ?? 0) > 16) {
-        score += 4;
-        reasons.push("implausible-touch-points");
+        add("environment", 3, "implausible-touch-points");
       }
     }
 
     if (now - record.lastSeen < 60_000) {
       if (record.challenges >= 15) {
-        score += 15;
-        reasons.push("high-request-frequency");
+        add("reputation", 8, "high-request-frequency");
       }
       if (record.challenges >= 40) {
-        score += 20;
-        reasons.push("very-high-request-frequency");
+        add("reputation", 8, "very-high-request-frequency");
       }
       if (record.userAgents.size >= 3 && !record.userAgents.has(userAgent)) {
-        score += 12;
-        reasons.push("ip-user-agent-rotation");
+        add("reputation", 8, "ip-user-agent-rotation");
       }
       if (record.countries.size >= 2 && country && !record.countries.has(country)) {
-        score += 8;
-        reasons.push("ip-country-rotation");
+        add("reputation", 6, "ip-country-rotation");
       }
     }
 
@@ -407,10 +453,30 @@ export class RiskTracker {
     }
     this.records.set(ip, record);
 
+    const cappedSignals: RiskSignalScores = {
+      automation: Math.min(signals.automation, RISK_CATEGORY_CAPS.automation),
+      environment: Math.min(signals.environment, RISK_CATEGORY_CAPS.environment),
+      reputation: Math.min(signals.reputation, RISK_CATEGORY_CAPS.reputation),
+      embedding: Math.min(signals.embedding, RISK_CATEGORY_CAPS.embedding),
+    };
+    const score = Math.min(
+      100,
+      cappedSignals.automation +
+        cappedSignals.environment +
+        cappedSignals.reputation +
+        cappedSignals.embedding,
+    );
     const computed = riskFromScore(score);
+    const requestedSteps = requested ? RISK_STEPS[requested] : 0;
+    const recommendedSteps = Math.max(riskBandFromScore(score), requestedSteps);
     return {
       level: requested ? maxRisk(computed, requested) : computed,
-      score: Math.min(100, score),
+      band: recommendedSteps,
+      score,
+      recommendedSteps,
+      requestedSteps,
+      policyVersion: RISK_POLICY_VERSION,
+      signals: cappedSignals,
       reasons,
       ip,
       ...(country ? { country } : {}),

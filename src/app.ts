@@ -24,7 +24,12 @@ import { renderGridItemSvg, renderTargetSvg } from "./grid.js";
 import { registerPlatform } from "./platform.js";
 import { PlatformStore } from "./platform-store.js";
 import { legalPageHtml } from "./legal.js";
-import { clientIp, RiskTracker } from "./risk.js";
+import {
+  clientIp,
+  RISK_BANDS,
+  RISK_POLICY_VERSION,
+  RiskTracker,
+} from "./risk.js";
 import { renderChallengeSvg } from "./render.js";
 import {
   getSite,
@@ -43,6 +48,7 @@ import type {
   EmbedTheme,
   HandMotionAction,
 } from "./types.js";
+import { MAX_DWELL_MS } from "./types.js";
 import { officialSiteHtml } from "./web.js";
 import { verifyTurnstile } from "./turnstile.js";
 
@@ -81,8 +87,8 @@ const SUPPORTED_API_VERSIONS = [
   API_V2_VERSION,
   API_NEXT_VERSION,
 ] as const;
-const APP_VERSION = "v26.0.4";
-const ASSET_VERSION = "26.0.4";
+const APP_VERSION = "v26.0.5";
+const ASSET_VERSION = "26.0.5";
 
 type ApiVersion = (typeof SUPPORTED_API_VERSIONS)[number];
 
@@ -290,7 +296,7 @@ const verifySchema = z.object({
       sellIndex: z.number().int().min(0).max(200),
     })
     .optional(),
-  dwellMs: z.number().int().min(0).max(10_000).optional(),
+  dwellMs: z.number().int().min(0).max(MAX_DWELL_MS).optional(),
   angle: z.number().min(-180).max(180).optional(),
   turnstileToken: z.string().max(2_048).optional(),
   handGestures: z
@@ -493,6 +499,7 @@ function serializeChallenge(
     step: (state.stepIndex ?? 0) + 1,
     totalSteps: state.totalSteps ?? 1,
     risk: state.risk ?? "low",
+    riskPolicyVersion: RISK_POLICY_VERSION,
     deviceClass: state.deviceClass ?? "desktop",
     preview: state.preview === true,
     swapAllowed: state.swapAllowed === true,
@@ -1381,6 +1388,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     mode: "api-and-open-platform",
     challengeTypes: CHALLENGE_TYPES,
     riskLevels: RISK_STEPS,
+    riskPolicy: {
+      version: RISK_POLICY_VERSION,
+      minSteps: 1,
+      maxSteps: 8,
+      bands: RISK_BANDS,
+    },
     clientContext: {
       version: apiVersion === API_VERSION ? API_NEXT_VERSION : apiVersion,
       requiredFor:
@@ -1483,8 +1496,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     return {
       apiVersion,
       risk: assessment.level,
+      band: assessment.band,
       score: assessment.score,
-      recommendedSteps: RISK_STEPS[assessment.level],
+      recommendedSteps: assessment.recommendedSteps,
+      requestedSteps: assessment.requestedSteps,
+      policyVersion: assessment.policyVersion,
+      signals: assessment.signals,
       reasons: assessment.reasons,
       context: {
         timezone: clientContext.timezone,
@@ -1641,8 +1658,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
     request.log.info(
       {
         event: "risk.assessed",
+        policyVersion: risk.policyVersion,
         score: risk.score,
         level: risk.level,
+        band: risk.band,
+        recommendedSteps: risk.recommendedSteps,
+        requestedSteps: risk.requestedSteps,
+        signals: risk.signals,
         reasons: risk.reasons,
         ip: risk.ip,
         country: risk.country,
@@ -1677,7 +1699,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
       parsed.data.accessible || (parsed.data.accessibilityNeeds?.length ?? 0) > 0,
       parsed.data.challengeType,
       risk.level,
-      parsed.data.steps,
+      Math.max(parsed.data.steps ?? 0, risk.recommendedSteps),
       false,
       deviceClassFor(request),
       false,
@@ -1700,7 +1722,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   ) => {
     const parsed = verifySchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.code(400).send({ verified: false, code: "INVALID_REQUEST" });
+      return reply.code(400).send({
+        verified: false,
+        code: "INVALID_REQUEST",
+        fields: parsed.error.issues
+          .map((issue) => issue.path.join("."))
+          .filter(Boolean),
+      });
     }
 
     const state = findState(challenges, request);
@@ -2136,7 +2164,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         embedAccessible,
         parsed.data.challengeType,
         risk.level,
-        parsed.data.steps,
+        Math.max(parsed.data.steps ?? 0, risk.recommendedSteps),
         testMode,
         deviceClassFor(request),
         false,

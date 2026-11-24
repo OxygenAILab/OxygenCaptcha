@@ -64,7 +64,7 @@ export function officialSiteHtml(config: AppConfig): string {
       "risk.2.title": "网络上下文",
       "risk.2.body": "Cloudflare IP、国家、请求频次、User-Agent 轮换与跨境不一致。",
       "risk.3.title": "会话预算",
-      "risk.3.body": "基础 3 步，风险升级为 4 / 6 / 8 步，中间步骤不签发令牌。",
+      "risk.3.body": "安全环境 1 题，风险逐级提升至 8 题，中间步骤不签发令牌。",
       "risk.4.title": "过程证据",
       "risk.4.body": "指针、按键、时序、视频骨骼、设备端声学特征与 Turnstile。",
       "privacy.heading": "敏感数据尽量不离开设备。",
@@ -116,7 +116,7 @@ export function officialSiteHtml(config: AppConfig): string {
       "risk.2.title": "Network context",
       "risk.2.body": "Cloudflare IP, country, request frequency, User-Agent rotation, and cross-border inconsistency.",
       "risk.3.title": "Session budget",
-      "risk.3.body": "Three base steps, upgraded to 4 / 6 / 8 by risk. No token is issued before the final step.",
+      "risk.3.body": "One challenge for safe traffic, escalating up to eight by risk. No token is issued before the final step.",
       "risk.4.title": "Process evidence",
       "risk.4.body": "Pointer, keys, timing, video skeleton, on-device acoustic features, and Turnstile.",
       "privacy.heading": "Keep sensitive data on the device whenever possible.",
@@ -223,7 +223,7 @@ export function officialSiteHtml(config: AppConfig): string {
       <div class="risk-grid">
         <article class="risk-item"><span>01 / IDENTITY</span><h3 data-i18n="risk.1.title">请求画像</h3><p data-i18n="risk.1.body">User-Agent、Client Hints、平台、系统版本、语言和 Fetch Metadata。</p></article>
         <article class="risk-item"><span>02 / NETWORK</span><h3 data-i18n="risk.2.title">网络上下文</h3><p data-i18n="risk.2.body">Cloudflare IP、国家、请求频次、User-Agent 轮换与跨境不一致。</p></article>
-        <article class="risk-item"><span>03 / SESSION</span><h3 data-i18n="risk.3.title">会话预算</h3><p data-i18n="risk.3.body">基础 3 步，风险升级为 4 / 6 / 8 步，中间步骤不签发令牌。</p></article>
+        <article class="risk-item"><span>03 / SESSION</span><h3 data-i18n="risk.3.title">会话预算</h3><p data-i18n="risk.3.body">安全环境 1 题，风险逐级提升至 8 题，中间步骤不签发令牌。</p></article>
         <article class="risk-item"><span>04 / EVIDENCE</span><h3 data-i18n="risk.4.title">过程证据</h3><p data-i18n="risk.4.body">指针、按键、时序、视频骨骼、设备端声学特征与 Turnstile。</p></article>
       </div>
     </div>
@@ -261,7 +261,7 @@ export function officialSiteHtml(config: AppConfig): string {
       <span><a href="/privacy-policy" data-i18n="footer.privacy">隐私政策</a> · <a href="/user-agreement" data-i18n="footer.terms">用户条款</a> · <a href="/v1/meta">API Meta</a> · <a href="https://github.com/OxygenAILab/OxygenChallenge">Private source</a></span>
     </div>
   </footer>
-  <script src="${origin}/widget.js?v=26.0.4" defer></script>
+  <script src="${origin}/widget.js?v=26.0.5" defer></script>
   <script>
     (() => {
       const translations = ${JSON.stringify(translations)};

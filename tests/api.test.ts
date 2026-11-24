@@ -727,12 +727,65 @@ describe("OxygenChallenge API", () => {
       payload: { siteKey: "site_test", action: "submit" },
     });
     expect(defaultSession.statusCode).toBe(200);
-    const session = defaultSession.json<{ risk: RiskLevel; step: number; totalSteps: number }>();
+    const session = defaultSession.json<{
+      risk: RiskLevel;
+      step: number;
+      totalSteps: number;
+      riskPolicyVersion: string;
+    }>();
     expect(session.step).toBe(1);
-    expect(session.totalSteps).toBe(RISK_STEPS[session.risk]);
+    expect(session.totalSteps).toBeGreaterThanOrEqual(1);
+    expect(session.totalSteps).toBeLessThanOrEqual(8);
+    expect(session.riskPolicyVersion).toBe("2026-11-24.1");
 
     const explicit = await create("grid_select");
     expect(explicit).toMatchObject({ step: 1, totalSteps: 1 });
+  });
+
+  it("gives a coherent browser one step and prevents lowering an explicit risk floor", async () => {
+    const headers = {
+      origin: "https://app.test",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/141.0.0.0 Safari/537.36",
+      "accept-language": "zh-HK,zh;q=0.9,en;q=0.8",
+      accept: "text/html",
+      "sec-fetch-mode": "navigate",
+      "sec-ch-ua": '"Chromium";v="141", "Google Chrome";v="141"',
+      "sec-ch-ua-platform": '"Windows"',
+      "sec-ch-ua-mobile": "?0",
+      "cf-ipcountry": "HK",
+      "cf-connecting-ip": "203.0.113.77",
+    };
+    const safe = await app.inject({
+      method: "POST",
+      url: "/v1/challenges",
+      headers: { ...headers, "cf-connecting-ip": "203.0.113.78" },
+      payload: { siteKey: "site_test", action: "submit" },
+    });
+    expect(safe.statusCode).toBe(200);
+    expect(safe.json()).toMatchObject({
+      risk: "low",
+      step: 1,
+      totalSteps: 1,
+      riskPolicyVersion: "2026-11-24.1",
+    });
+
+    const cannotDowngrade = await app.inject({
+      method: "POST",
+      url: "/v1/challenges",
+      headers,
+      payload: {
+        siteKey: "site_test",
+        action: "submit",
+        risk: "critical",
+        steps: 1,
+      },
+    });
+    expect(cannotDowngrade.statusCode).toBe(200);
+    expect(cannotDowngrade.json()).toMatchObject({
+      risk: "critical",
+      totalSteps: 8,
+    });
   });
 
   it("maps high and critical risk to six and eight steps", async () => {

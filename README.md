@@ -1,6 +1,6 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0.4` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0.5` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
 一次性验证令牌、vNext 风险上下文、风险会话和十五类交互挑战：
 
@@ -21,9 +21,11 @@
 - `speech_wave`：同一句多遍朗读，比较指定字词窗口的声学非严格一致性。
 
 自动风险评分会综合 UA、Sec-CH-UA、平台/系统版本、系统语言、浏览器时区、用户选择语言、
-Cloudflare 国家、IP 频次与 UA 轮换；`low` 风险会话为 3 步，`medium/high/critical`
-分别为 4/6/8 步。显式指定 `challengeType` 时保持单步；无障碍模式会依据多选的无障碍
-理由组合多步骤图文/音频/基础验证。中间步骤不会签发令牌，最后一步通过后才签发。
+Cloudflare 国家、IP 频次与 UA 轮换，并把信号分成 automation、environment、reputation、
+embedding 四组。分数 0-100 映射为八档，步骤从安全环境的 1 题逐级增加到 8 题；
+`low/medium/high/critical` 作为兼容性风险下限，对应 1/4/6/8 题。Electron 等正常桌面壳
+不再按自动化 UA 直接重罚。显式指定 `challengeType` 时保持单步；无障碍模式会依据多选的
+无障碍理由组合多步骤图文/音频/基础验证。中间步骤不会签发令牌，最后一步通过后才签发。
 
 服务没有后台仪表盘，只暴露 Challenge、资源、嵌入页和 `siteverify` 接口。验证组件默认
 显示 hCaptcha 风格的固定高紧凑入口，点击后才请求挑战，并在当前层向上展开；验证完成后

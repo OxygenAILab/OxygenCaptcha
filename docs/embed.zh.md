@@ -39,8 +39,8 @@
 | `name` | 否 | `oxygen-token` | 隐藏字段名 |
 | `width` | 否 | `400` | 入口宽度，范围 280 到 600px；小屏会自动限制为容器宽度 |
 | `challenge-type` | 否 | 随机 | 固定题型，见 API 文档 |
-| `risk` | 否 | `low` | `low/medium/high/critical`，对应 3/4/6/8 步 |
-| `steps` | 否 | 风险默认 | 自定义 1 到 8 步，主要用于验收 |
+| `risk` | 否 | `low` | `low/medium/high/critical`，对应 1/4/6/8 步的最小风险 |
+| `steps` | 否 | 风险默认 | 1 到 8；只能提高，不能低于服务端风险下限 |
 | `accessible` | 否 | `false` | 设为 `true` 进入无障碍流程；配合 `accessibilityNeeds` 组合多步骤题型 |
 | `api-version` | 否 | `2` | `2` 上报时区/语言/屏幕；`4` 还要求 `background-color`；`1` 回退旧版 |
 | `background-color` | v4 是 | - | 消费端嵌入位置背景色，支持 hex 或 rgb，v4 下必填 |
@@ -133,8 +133,8 @@ document.querySelector("oxygen-challenge").reset();
 | `action` | 业务动作 |
 | `parentOrigin` | 可选，必须在站点 origin 白名单内 |
 | `challengeType` | 可选，固定题型 |
-| `risk` | 可选，`low/medium/high/critical` |
-| `steps` | 可选，1 到 8 |
+| `risk` | 可选，`low/medium/high/critical` 兼容性下限 |
+| `steps` | 可选，1 到 8，只能提高服务端建议步数 |
 | `accessible` | `0` 或 `1` |
 | `apiVersion` | `1` 或 `2`；`2` 需要 `clientContext` |
 | `clientContext` | URL 编码后的 JSON；Web Component 自动生成 |

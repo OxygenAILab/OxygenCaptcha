@@ -6,9 +6,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { RISK_STEPS } from "../src/challenge.js";
 import { PlatformStore } from "../src/platform-store.js";
-import { clientIp, maxRisk, riskFromScore, RiskTracker } from "../src/risk.js";
+import {
+  clientIp,
+  maxRisk,
+  riskBandFromScore,
+  riskFromScore,
+  RISK_BANDS,
+  RISK_POLICY_VERSION,
+  RiskTracker,
+} from "../src/risk.js";
 import { createSpeechWave, SPEECH_TEMPLATES, speechTakesValid } from "../src/speech.js";
 import { verifyTurnstile } from "../src/turnstile.js";
+import { MAX_DWELL_MS } from "../src/types.js";
 import type {
   AppConfig,
   ChallengeEvidence,
@@ -181,6 +190,39 @@ describe("alpha.6 challenge verification", () => {
     }
   });
 
+  it("accepts a human dwell for the full challenge lifetime", async () => {
+    const built = await buildApp({
+      config: makeConfig(),
+      logger: false,
+      publicDir: mkdtempSync(join(tmpdir(), "oxygenchallenge-empty-")),
+    });
+    try {
+      const human = await createChallenge(built, "human_check");
+      const accepted = await built.app.inject({
+        method: "POST",
+        url: `/v1/challenges/${human.challengeId}/verify`,
+        payload: { answer: "human", dwellMs: 120_000 },
+      });
+      expect(accepted.statusCode).toBe(200);
+      expect(accepted.json()).toMatchObject({ verified: true });
+
+      const invalid = await createChallenge(built, "human_check");
+      const rejected = await built.app.inject({
+        method: "POST",
+        url: `/v1/challenges/${invalid.challengeId}/verify`,
+        payload: { answer: "human", dwellMs: MAX_DWELL_MS + 1 },
+      });
+      expect(rejected.statusCode).toBe(400);
+      expect(rejected.json()).toMatchObject({
+        verified: false,
+        code: "INVALID_REQUEST",
+        fields: ["dwellMs"],
+      });
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it("compares every requested speech target window", () => {
     for (const template of SPEECH_TEMPLATES) {
       const state = createSpeechWave(template);
@@ -263,9 +305,97 @@ describe("alpha.6 risk helpers", () => {
         ip: "127.0.0.1",
       }),
     ).toBe("203.0.113.42");
-    expect(riskFromScore(20)).toBe("medium");
+    expect(riskBandFromScore(0)).toBe(1);
+    expect(riskBandFromScore(11)).toBe(1);
+    expect(riskBandFromScore(12)).toBe(2);
+    expect(riskBandFromScore(25)).toBe(3);
+    expect(riskBandFromScore(38)).toBe(4);
+    expect(riskBandFromScore(50)).toBe(5);
+    expect(riskBandFromScore(63)).toBe(6);
+    expect(riskBandFromScore(75)).toBe(7);
+    expect(riskBandFromScore(88)).toBe(8);
+    expect(riskFromScore(24)).toBe("low");
+    expect(riskFromScore(25)).toBe("medium");
+    expect(riskFromScore(74)).toBe("high");
+    expect(riskFromScore(75)).toBe("critical");
     expect(maxRisk("low", "critical")).toBe("critical");
     expect(maxRisk("high", "medium")).toBe("high");
+  });
+
+  it("keeps a coherent browser at one step and does not treat Electron as a bot", () => {
+    const tracker = new RiskTracker();
+    const headers = {
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/141.0.0.0 Safari/537.36",
+      "accept-language": "zh-HK,zh;q=0.9,en;q=0.8",
+      accept: "text/html",
+      "sec-fetch-mode": "navigate",
+      "sec-ch-ua": '"Chromium";v="141", "Google Chrome";v="141"',
+      "sec-ch-ua-platform": '"Windows"',
+      "sec-ch-ua-mobile": "?0",
+      "cf-ipcountry": "HK",
+    };
+    const context = {
+      timezone: "Asia/Hong_Kong",
+      timezoneOffsetMinutes: -480,
+      systemLanguage: "zh-HK",
+      languages: ["zh-HK", "en"],
+      selectedLanguage: "zh-HK",
+      platform: "Win32",
+      webdriver: false,
+      cookiesEnabled: true,
+      screen: { width: 1440, height: 900, pixelRatio: 1 },
+    };
+    const safe = tracker.assess(
+      { headers, ip: "203.0.113.20" },
+      true,
+      undefined,
+      context,
+    );
+    expect(safe).toMatchObject({
+      level: "low",
+      band: 1,
+      recommendedSteps: 1,
+      score: 0,
+      policyVersion: RISK_POLICY_VERSION,
+    });
+    expect(RISK_BANDS).toHaveLength(8);
+
+    const electron = tracker.assess(
+      {
+        headers: {
+          ...headers,
+          "user-agent": `${headers["user-agent"]} Electron/45.3.2`,
+        },
+        ip: "203.0.113.21",
+      },
+      true,
+      undefined,
+      context,
+    );
+    expect(electron.level).toBe("low");
+    expect(electron.band).toBe(1);
+    expect(electron.score).toBe(4);
+    expect(electron.reasons).toContain("desktop-shell-runtime");
+
+    const automated = tracker.assess(
+      { headers, ip: "203.0.113.22" },
+      true,
+      undefined,
+      { ...context, webdriver: true },
+    );
+    expect(automated.level).not.toBe("low");
+    expect(automated.band).toBeGreaterThanOrEqual(5);
+    expect(automated.reasons).toContain("webdriver-detected");
+
+    const forcedCritical = tracker.assess(
+      { headers, ip: "203.0.113.23" },
+      true,
+      "critical",
+      context,
+    );
+    expect(forcedCritical.band).toBe(8);
+    expect(forcedCritical.recommendedSteps).toBe(8);
   });
 
   it("detects automation and user-agent rotation without blocking normal browsers", () => {
@@ -327,7 +457,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
       expect(meta.json()).toMatchObject({
         apiVersion: "1",
-        version: "v26.0.4",
+        version: "v26.0.5",
         endpoints: { riskAssess: "/v4/risk/assess" },
       });
 
@@ -362,6 +492,11 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
         endpoints: {
           challenge: "/v2/challenges",
           riskAssess: "/v2/risk/assess",
+        },
+        riskPolicy: {
+          version: RISK_POLICY_VERSION,
+          minSteps: 1,
+          maxSteps: 8,
         },
       });
 
@@ -416,6 +551,15 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       expect(assessed.statusCode).toBe(200);
       expect(assessed.json()).toMatchObject({
         apiVersion: "2",
+        policyVersion: RISK_POLICY_VERSION,
+        band: expect.any(Number),
+        recommendedSteps: expect.any(Number),
+        signals: {
+          automation: expect.any(Number),
+          environment: expect.any(Number),
+          reputation: expect.any(Number),
+          embedding: expect.any(Number),
+        },
         context: {
           timezone: "America/New_York",
           systemLanguage: "en-US",
@@ -521,7 +665,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       });
       expect(created.statusCode).toBe(200);
       const first = created.json<{ challengeId: string; totalSteps: number }>();
-      expect(first.totalSteps).toBe(2);
+      expect(first.totalSteps).toBe(RISK_STEPS.critical);
       const firstState = stateFor(built, first.challengeId);
       const verified = await built.app.inject({
         method: "POST",
@@ -562,6 +706,11 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
         endpoints: {
           challenge: "/v4/challenges",
           riskAssess: "/v4/risk/assess",
+        },
+        riskPolicy: {
+          version: RISK_POLICY_VERSION,
+          minSteps: 1,
+          maxSteps: 8,
         },
         clientContext: {
           version: "4",
@@ -637,6 +786,8 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       expect(assessed.statusCode).toBe(200);
       expect(assessed.json()).toMatchObject({
         apiVersion: "4",
+        policyVersion: RISK_POLICY_VERSION,
+        recommendedSteps: expect.any(Number),
         theme: { mode: "dark", backgroundColor: "#112233" },
       });
 
@@ -979,7 +1130,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       }
       const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
       expect(openapi.statusCode).toBe(200);
-      expect(openapi.body).toContain("version: 26.0.4");
+      expect(openapi.body).toContain("version: 26.0.5");
     } finally {
       await built.app.close();
     }

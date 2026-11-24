@@ -43,6 +43,13 @@ export type ChallengeType =
   | "speech_wave";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
+export const RISK_STEPS: Record<RiskLevel, number> = {
+  low: 1,
+  medium: 4,
+  high: 6,
+  critical: 8,
+};
+export const MAX_DWELL_MS = 900_000;
 export type AccessibilityNeed =
   | "vision"
   | "motor"

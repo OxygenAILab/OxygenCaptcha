@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OxygenChallenge API
-  version: 26.0.4
+  version: 26.0.5
   description: Risk-aware CAPTCHA API with v1 compatibility and vNext client-context risk assessment.
   license:
     name: Apache-2.0
@@ -32,6 +32,10 @@ paths:
       responses:
         "200":
           description: Risk assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskAssessmentResponse"
         "400":
           description: Invalid client context
         "403":
@@ -279,6 +283,15 @@ paths:
       responses:
         "200":
           description: Risk assessment with derived embed theme
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/RiskAssessmentResponse"
+                  - type: object
+                    properties:
+                      theme:
+                        $ref: "#/components/schemas/EmbedTheme"
         "400":
           description: Invalid or missing embed context
         "403":
@@ -674,6 +687,76 @@ components:
     RiskLevel:
       type: string
       enum: [low, medium, high, critical]
+    RiskSignalScores:
+      type: object
+      required: [automation, environment, reputation, embedding]
+      properties:
+        automation:
+          type: number
+          minimum: 0
+          maximum: 65
+        environment:
+          type: number
+          minimum: 0
+          maximum: 25
+        reputation:
+          type: number
+          minimum: 0
+          maximum: 20
+        embedding:
+          type: number
+          minimum: 0
+          maximum: 10
+    RiskAssessmentResponse:
+      type: object
+      required:
+        - apiVersion
+        - risk
+        - band
+        - score
+        - recommendedSteps
+        - requestedSteps
+        - policyVersion
+        - signals
+        - reasons
+        - assessedAt
+      properties:
+        apiVersion:
+          type: string
+          enum: ["2", "4"]
+        risk:
+          $ref: "#/components/schemas/RiskLevel"
+        band:
+          type: integer
+          minimum: 1
+          maximum: 8
+        score:
+          type: number
+          minimum: 0
+          maximum: 100
+        recommendedSteps:
+          type: integer
+          minimum: 1
+          maximum: 8
+        requestedSteps:
+          type: integer
+          minimum: 0
+          maximum: 8
+        policyVersion:
+          type: string
+          example: "2026-11-24.1"
+        signals:
+          $ref: "#/components/schemas/RiskSignalScores"
+        reasons:
+          type: array
+          items:
+            type: string
+        context:
+          type: object
+          additionalProperties: true
+        assessedAt:
+          type: string
+          format: date-time
     CreateChallengeRequest:
       type: object
       required: [siteKey]
@@ -693,10 +776,12 @@ components:
           $ref: "#/components/schemas/ChallengeType"
         risk:
           $ref: "#/components/schemas/RiskLevel"
+          description: Legacy minimum-risk floor. low/medium/high/critical map to 1/4/6/8 steps.
         steps:
           type: integer
           minimum: 1
           maximum: 8
+          description: Optional step floor. It can raise but never lower the server-assessed risk.
         accessibilityNeeds:
           type: array
           maxItems: 4
@@ -888,6 +973,9 @@ components:
           maximum: 8
         risk:
           $ref: "#/components/schemas/RiskLevel"
+        riskPolicyVersion:
+          type: string
+          example: "2026-11-24.1"
         deviceClass:
           type: string
           enum: [desktop, mobile]

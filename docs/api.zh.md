@@ -1,6 +1,6 @@
 # OxygenChallenge API
 
-版本：`26.0.4`
+版本：`26.0.5`
 
 ## 先决条件
 
@@ -26,16 +26,31 @@
 }
 ```
 
-`challengeType` 可选。显式指定时创建单题会话；不传时创建风险会话。`risk` 与步数：
+`challengeType` 可选。显式指定时创建单题会话；不传时创建风险会话。`risk` 是兼容性风险下限：
 
 | `risk` | 步数 |
 |---|---:|
-| `low` | 3 |
+| `low` | 1 |
 | `medium` | 4 |
 | `high` | 6 |
 | `critical` | 8 |
 
-测试或特殊接入可使用 `steps: 1..8` 覆盖步数。`accessible: true` 且提供 `accessibilityNeeds` 时按理由组合可用题型；未提供理由时保留单步反色题兼容行为。
+服务端会先根据请求头、Cloudflare 国家、客户端上下文和短期 IP 记录计算 `score`（0-100），
+再映射为八档 `band` 与 `1..8` 个步骤。典型映射：
+
+| `band` | 分数 | 建议步数 |
+|---|---:|---:|
+| 1 | 0-11 | 1 |
+| 2 | 12-24 | 2 |
+| 3 | 25-37 | 3 |
+| 4 | 38-49 | 4 |
+| 5 | 50-62 | 5 |
+| 6 | 63-74 | 6 |
+| 7 | 75-87 | 7 |
+| 8 | 88-100 | 8 |
+
+`steps: 1..8` 只能提高建议题数，不能低于服务端计算出的风险下限。`accessible: true` 且提供
+`accessibilityNeeds` 时按理由组合可用题型；未提供理由时保留单步反色题兼容行为。
 
 ## vNext 客户端上下文
 
@@ -63,7 +78,9 @@
 ```
 
 `selectedLanguage` 是消费端用户选择的界面语言，不是浏览器默认语言。`/v2/risk/assess`
-可先返回 `risk`、`score`、`recommendedSteps` 和风险原因，消费者再决定是否创建挑战。
+可先返回 `risk`、`band`、`score`、`recommendedSteps`、`requestedSteps`、`policyVersion`、
+`signals` 和风险原因，消费者再决定是否创建挑战。`signals` 分别汇总
+`automation/environment/reputation/embedding` 四组信号。
 vNext 创建响应中的资源 URL 会使用 `/v2/challenges/:id/*` 与
 `/v2/animal-sounds/:animal.wav`，与调用方的 API 版本保持一致。
 

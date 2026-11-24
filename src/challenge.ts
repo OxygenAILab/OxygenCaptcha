@@ -12,6 +12,7 @@ import {
 } from "./microgames.js";
 import { createMotion, validMotionPoint } from "./motion.js";
 import { createSpeechWave, SPEECH_TEMPLATES, speechTakesValid } from "./speech.js";
+import { RISK_STEPS } from "./types.js";
 import type {
   AccessibilityNeed,
   AppConfig,
@@ -30,6 +31,8 @@ import type {
   RiskLevel,
 } from "./types.js";
 import type { TokenService } from "./token.js";
+
+export { RISK_STEPS } from "./types.js";
 
 const PALETTE = [
   { background: "#0b1f33", inverse: "#f4e0cc" },
@@ -128,13 +131,6 @@ const CHALLENGE_TYPES: ChallengeType[] = [
   "hand_motion",
   "speech_wave",
 ];
-
-export const RISK_STEPS: Record<RiskLevel, number> = {
-  low: 3,
-  medium: 4,
-  high: 6,
-  critical: 8,
-};
 
 export type VerificationResult =
   | { kind: "verified"; receipt: ChallengeReceipt; state: ChallengeState }

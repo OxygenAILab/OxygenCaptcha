@@ -37,6 +37,7 @@ import {
   type MarketController,
 } from "./market.js";
 import type { HandMotionAction } from "../types.js";
+import { MAX_DWELL_MS } from "../types.js";
 
 type MotionData = {
   width: number;
@@ -84,7 +85,13 @@ declare global {
 const form = document.querySelector<HTMLFormElement>("#oc-form");
 const shell = document.querySelector<HTMLElement>(".oc-shell");
 const body = document.body;
-const challengeApiVersion = shell?.dataset.apiVersion === "2" ? "2" : "1";
+const requestedChallengeApiVersion = shell?.dataset.apiVersion;
+const challengeApiVersion =
+  requestedChallengeApiVersion === "4"
+    ? "4"
+    : requestedChallengeApiVersion === "2"
+      ? "2"
+      : "1";
 const challengeApiPrefix = `/v${challengeApiVersion}`;
 const input = document.querySelector<HTMLInputElement>("#oc-answer");
 const submit = document.querySelector<HTMLButtonElement>("#oc-submit");
@@ -2104,7 +2111,10 @@ form?.addEventListener("submit", async (event) => {
       return;
     }
     payload.answer = "human";
-    payload.dwellMs = Math.round(performance.now() - pageStartedAt);
+    payload.dwellMs = Math.min(
+      MAX_DWELL_MS,
+      Math.max(0, Math.round(performance.now() - pageStartedAt)),
+    );
   } else if (type === "rotate_align") {
     payload.angle = rotateAngle;
   } else if (type === "semantic_pick") {
@@ -2154,6 +2164,8 @@ form?.addEventListener("submit", async (event) => {
       preview?: boolean;
       token?: string;
       code?: string;
+      error?: string;
+      fields?: string[];
       remainingAttempts?: number;
       stepPassed?: boolean;
       step?: number;
@@ -2174,9 +2186,15 @@ form?.addEventListener("submit", async (event) => {
             ? "请求过于频繁，请稍后重试。"
             : response.status === 410
               ? "本次验证已过期，请重新开始。"
+              : response.status === 400 && result.code === "INVALID_REQUEST"
+                ? "验证数据已失效，请刷新页面后重试。"
+                : response.status === 400 && result.error === "API_VERSION_MISMATCH"
+                  ? "验证组件版本不一致，请刷新页面后重试。"
               : "验证服务暂时不可用，请稍后重试。";
       setStatus(message, "error");
-      post("failed", { code: result.code ?? `HTTP_${response.status}` });
+      post("failed", {
+        code: result.code ?? result.error ?? `HTTP_${response.status}`,
+      });
       return;
     }
 
