@@ -91,5 +91,9 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
 - 2026-11-15：为 PrimaLauncher 本地开发补齐 `oc_account_oxygenai_top` 的受控来源
   `http://127.0.0.1:4317` 与 `http://localhost:4317`。生产 `/embed` 对两个来源返回
   200，未授权来源仍返回 403；PrimaLauncher 的 Web Component iframe 已完成实测。
+- 2026-11-24：`v26.0.5` 修复 `human_check` 停留时间超过 10 秒时返回 400 的问题，
+  并把风险策略升级为 8 档 1-8 题模型。安全真实浏览器从 1 题开始，Electron 桌面壳
+  不再直接视为自动化；`webdriver`、环境不一致、短期 IP 频次和嵌入异常按分组封顶。
+  生产环境完成超过 10 秒的人类验证、公开页面 smoke 和 API 回归。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->
