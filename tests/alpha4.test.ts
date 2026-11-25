@@ -457,7 +457,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       expect(meta.headers["x-oxygen-challenge-api-version"]).toBe("1");
       expect(meta.json()).toMatchObject({
         apiVersion: "1",
-        version: "v26.0.5",
+        version: "v26.0.6",
         endpoints: { riskAssess: "/v4/risk/assess" },
       });
 
@@ -1130,7 +1130,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       }
       const openapi = await built.app.inject({ method: "GET", url: "/openapi.yaml" });
       expect(openapi.statusCode).toBe(200);
-      expect(openapi.body).toContain("version: 26.0.5");
+      expect(openapi.body).toContain("version: 26.0.6");
     } finally {
       await built.app.close();
     }

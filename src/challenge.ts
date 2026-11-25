@@ -915,7 +915,7 @@ export class ChallengeStore {
       ...common,
       keyPointer: {
         requiredDistance: input.preview ? 180 : randomInt(150, 221),
-        requiredHoldMs: input.preview ? 800 : randomInt(650, 951),
+        requiredHoldMs: input.preview ? 300 : randomInt(260, 421),
         ...(input.preview
           ? { requiredKey: "Space", requiredKeyLabel: "空格" }
           : (() => {

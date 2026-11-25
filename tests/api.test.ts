@@ -548,7 +548,8 @@ describe("OxygenChallenge API", () => {
     const state = challenges.getForAsset(body.challengeId);
     expect(body.type).toBe("key_pointer");
     expect(body.requiredDistance).toBeGreaterThanOrEqual(150);
-    expect(body.requiredHoldMs).toBeGreaterThanOrEqual(650);
+    expect(body.requiredHoldMs).toBeGreaterThanOrEqual(260);
+    expect(body.requiredHoldMs).toBeLessThanOrEqual(420);
     if (!state?.keyPointer) {
       throw new Error("key pointer state missing");
     }

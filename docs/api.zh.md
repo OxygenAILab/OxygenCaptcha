@@ -1,6 +1,6 @@
 # OxygenChallenge API
 
-版本：`26.0.5`
+版本：`26.0.6`
 
 ## 先决条件
 
@@ -119,7 +119,7 @@ vNext 创建响应中的资源 URL 会使用 `/v2/challenges/:id/*` 与
 | `motion_drag` | 拖动遮罩持续覆盖移动目标 |
 | `audio_sequence` | 听取声音序列并选择目标动物 |
 | `calculation` | 输入大数四则运算结果 |
-| `key_pointer` | 同时按住随机指定按键并向右拖动；移动端自动过滤 |
+| `key_pointer` | 同时按住随机指定按键并向右拖动；按键与拖动的重叠时长达标即可，先松开按键或滑块都有效；移动端自动过滤 |
 | `pattern_memory` | 观察并重复闪烁图标序列 |
 | `count_flash` | 记住短暂显示的圆点数量 |
 | `market_trade` | 在滚动曲线区间低买高卖，或累计达到目标本金 |

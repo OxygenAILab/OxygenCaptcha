@@ -1,6 +1,6 @@
 # OxygenChallenge
 
-面向 Agent 时代的风险自适应 Challenge 服务。`v26.0.5` 提供 OC 官网、
+面向 Agent 时代的风险自适应 Challenge 服务。`v26.0.6` 提供 OC 官网、
 随机挑战入口 `/captcha`、可嵌入 Web Component、跨域 iframe、OxygenAccount 开放平台、
 一次性验证令牌、vNext 风险上下文、风险会话和十五类交互挑战：
 
@@ -9,7 +9,7 @@
 - `motion_drag`：拖动遮罩持续覆盖 Canvas 中的移动目标，要求后段持续命中。
 - `audio_sequence`：程序合成动物声音序列，选择猫叫之后的动物。
 - `calculation`：需要计算器的大数四则运算。
-- `key_pointer`：同时按住随机指定按键并拖动滑块的组合输入；移动端自动过滤。
+- `key_pointer`：同时按住随机指定按键并拖动滑块，按键与拖动重叠即可，释放顺序不限；移动端自动过滤。
 - `pattern_memory`：观察并重复随机闪烁的图标序列。
 - `count_flash`：记住瞬时出现的小规模圆点数量。
 - `market_trade`：右向左滚动的拟真价格曲线，支持单次低买高卖和目标本金模式。

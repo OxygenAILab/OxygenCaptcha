@@ -246,7 +246,12 @@ def solve_pattern(page: Page, state: dict, submit: bool = True) -> None:
         wait_for_status(page, "验证成功")
 
 
-def solve_key_pointer(page: Page, state: dict, submit: bool = True) -> None:
+def solve_key_pointer(
+    page: Page,
+    state: dict,
+    submit: bool = True,
+    release_pointer_first: bool = True,
+) -> None:
     required_distance = state["keyPointer"]["requiredDistance"]
     required_hold = state["keyPointer"]["requiredHoldMs"]
     required_key = state["keyPointer"]["requiredKey"]
@@ -256,14 +261,21 @@ def solve_key_pointer(page: Page, state: dict, submit: bool = True) -> None:
     page.keyboard.down(keyboard_key)
     page.mouse.move(track["x"] + 28, track["y"] + track["height"] / 2)
     page.mouse.down()
+    first_wait = max(80, required_hold // 2)
+    page.wait_for_timeout(first_wait)
     page.mouse.move(
         track["x"] + min(track["width"] - 28, 30 + required_distance),
         track["y"] + track["height"] / 2,
         steps=8,
     )
-    page.wait_for_timeout(required_hold + 250)
-    page.mouse.up()
-    page.keyboard.up(keyboard_key)
+    page.wait_for_timeout(max(80, required_hold - first_wait + 40))
+    if release_pointer_first:
+        page.mouse.up()
+        page.keyboard.up(keyboard_key)
+    else:
+        page.keyboard.up(keyboard_key)
+        page.mouse.up()
+    page.wait_for_timeout(80)
     assert page.locator("#oc-submit").is_enabled()
     if submit:
         page.locator("#oc-submit").click()
@@ -583,10 +595,21 @@ def run_calculation_checks(browser: Browser) -> None:
 
 def run_key_pointer_checks(browser: Browser) -> None:
     page, errors = open_page(browser, {"width": 900, "height": 760}, reduced_motion="no-preference")
-    page.goto(embed_url("key_pointer"), wait_until="networkidle")
-    state = challenge_state(page)
-    solve_key_pointer(page, state, submit=True)
-    page.screenshot(path=str(OUT / "desktop-key-pointer-success.png"), full_page=True)
+    for index, release_pointer_first in enumerate((True, False)):
+        page.goto(embed_url("key_pointer"), wait_until="networkidle")
+        state = challenge_state(page)
+        solve_key_pointer(
+            page,
+            state,
+            submit=True,
+            release_pointer_first=release_pointer_first,
+        )
+        screenshot = (
+            "desktop-key-pointer-success.png"
+            if index == 0
+            else "desktop-key-pointer-keyup-first-success.png"
+        )
+        page.screenshot(path=str(OUT / screenshot), full_page=True)
     assert not errors, errors
 
 

@@ -1646,7 +1646,7 @@ function initKeyPointer(): void {
   let pointerDown = false;
   let requiredKeyDown = false;
   let distance = 0;
-  let holdStartedAt = 0;
+  let combinedStartedAt = 0;
 
   const setHelper = (message: string, tone: "neutral" | "error" | "success" = "neutral") => {
     if (help) {
@@ -1670,33 +1670,72 @@ function initKeyPointer(): void {
     paint();
   };
 
+  const markReady = (currentDistance: number, overlapMs: number) => {
+    keyPointerReady = true;
+    keyPointerEvidence = {
+      holdMs: Math.round(overlapMs),
+      distance: Math.round(currentDistance),
+      keyCode: requiredKey,
+    };
+    submit.disabled = false;
+    if (help) {
+      help.textContent = "双输入已确认，点击验证。";
+    }
+    setStatus("双输入成功，可以验证。", "success");
+  };
+
+  const finishIfEligible = (now = performance.now()) => {
+    if (keyPointerReady) {
+      return true;
+    }
+    const currentDistance = paint();
+    if (!requiredKeyDown || !pointerDown) {
+      return false;
+    }
+    if (combinedStartedAt === 0) {
+      combinedStartedAt = now;
+    }
+    const overlapMs = Math.round(now - combinedStartedAt);
+    if (currentDistance >= requiredDistance && overlapMs >= requiredHold) {
+      markReady(currentDistance, overlapMs);
+      return true;
+    }
+    return false;
+  };
+
   const tick = (now: number) => {
     if (keyPointerReady) {
       return;
     }
     const currentDistance = paint();
     if (requiredKeyDown && pointerDown && currentDistance >= requiredDistance) {
-      if (holdStartedAt === 0) {
-        holdStartedAt = now;
-        setStatus("正在确认双输入持续时间…");
+      if (combinedStartedAt === 0) {
+        combinedStartedAt = now;
       }
-      const heldFor = Math.round(now - holdStartedAt);
-      if (heldFor >= requiredHold) {
-        keyPointerReady = true;
-        keyPointerEvidence = {
-          holdMs: heldFor,
-          distance: Math.round(currentDistance),
-          keyCode: requiredKey,
-        };
-        submit.disabled = false;
-        if (help) {
-          help.textContent = "双输入已确认，点击验证。";
-        }
-        setStatus("双输入成功，可以验证。", "success");
+      const overlapMs = Math.round(now - combinedStartedAt);
+      if (overlapMs >= requiredHold) {
+        markReady(currentDistance, overlapMs);
         return;
       }
+      if (help) {
+        help.textContent = `已到目标，继续保持 ${Math.max(0, requiredHold - overlapMs)} ms。`;
+      }
+    } else if (requiredKeyDown && pointerDown) {
+      if (combinedStartedAt === 0) {
+        combinedStartedAt = now;
+      }
+      if (help) {
+        const progress = Math.min(
+          99,
+          Math.max(
+            0,
+            Math.round((currentDistance / Math.max(1, requiredDistance)) * 100),
+          ),
+        );
+        help.textContent = `保持 ${requiredKeyLabel} 键并向右拖动（${progress}%）。`;
+      }
     } else {
-      holdStartedAt = 0;
+      combinedStartedAt = 0;
     }
     requestAnimationFrame(tick);
   };
@@ -1705,12 +1744,16 @@ function initKeyPointer(): void {
     if (
       event.code !== requiredKey ||
       event.repeat ||
-      (event.target instanceof Element && event.target.closest("input, textarea, button"))
+      (event.target instanceof Element &&
+        event.target.closest("input, textarea, select, [contenteditable='true']"))
     ) {
       return;
     }
     event.preventDefault();
     requiredKeyDown = true;
+    if (pointerDown) {
+      combinedStartedAt = performance.now();
+    }
     setHelper(`已按下 ${requiredKeyLabel} 键，继续拖动滑块。`);
     requestAnimationFrame(tick);
   });
@@ -1719,9 +1762,10 @@ function initKeyPointer(): void {
     if (event.code !== requiredKey) {
       return;
     }
+    finishIfEligible();
     requiredKeyDown = false;
     if (!keyPointerReady) {
-      holdStartedAt = 0;
+      combinedStartedAt = 0;
       setHelper(`${requiredKeyLabel} 键已松开，需要保持组合操作。`, "error");
     }
   });
@@ -1731,6 +1775,9 @@ function initKeyPointer(): void {
       return;
     }
     pointerDown = true;
+    if (requiredKeyDown) {
+      combinedStartedAt = performance.now();
+    }
     track.setPointerCapture(event.pointerId);
     trackPointer(event);
     play("click");
@@ -1742,9 +1789,10 @@ function initKeyPointer(): void {
     }
   });
   const releasePointer = () => {
+    finishIfEligible();
     pointerDown = false;
     if (!keyPointerReady) {
-      holdStartedAt = 0;
+      combinedStartedAt = 0;
       setHelper(`继续按住 ${requiredKeyLabel} 键，并将滑块拖到右侧。`, "error");
     }
   };

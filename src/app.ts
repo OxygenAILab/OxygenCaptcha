@@ -87,8 +87,8 @@ const SUPPORTED_API_VERSIONS = [
   API_V2_VERSION,
   API_NEXT_VERSION,
 ] as const;
-const APP_VERSION = "v26.0.5";
-const ASSET_VERSION = "26.0.5";
+const APP_VERSION = "v26.0.6";
+const ASSET_VERSION = "26.0.6";
 
 type ApiVersion = (typeof SUPPORTED_API_VERSIONS)[number];
 
@@ -557,7 +557,7 @@ function serializeChallenge(
   if (state.type === "key_pointer" && state.keyPointer) {
     return {
       ...common,
-      prompt: `按住 ${state.keyPointer.requiredKeyLabel} 键，同时向右拖动滑块并保持片刻`,
+      prompt: `按住 ${state.keyPointer.requiredKeyLabel} 键，同时向右拖动滑块`,
       requiredDistance: state.keyPointer.requiredDistance,
       requiredHoldMs: state.keyPointer.requiredHoldMs,
       requiredKey: state.keyPointer.requiredKey,
@@ -813,7 +813,7 @@ function challengeBody(
           <span class="oc-gesture-knob"></span>
         </div>
       </div>
-      <p class="oc-helper" id="oc-gesture-help">需要同时按住键盘并拖动滑块。</p>
+      <p class="oc-helper" id="oc-gesture-help">按住键盘并拖动滑块；两项输入重叠即可完成。</p>
       <div class="oc-controls oc-controls-end">
         <button class="oc-submit" id="oc-submit" type="submit" disabled>验证</button>
       </div>`;

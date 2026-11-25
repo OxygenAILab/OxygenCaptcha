@@ -255,7 +255,7 @@ function platformHtml(config: AppConfig): string {
       <div class="loading">正在读取登录状态…</div>
     </section>
   </main>
-  <script defer src="/platform.js?v=26.0.5"></script>
+  <script defer src="/platform.js?v=26.0.6"></script>
 </body>
 </html>`;
 }
