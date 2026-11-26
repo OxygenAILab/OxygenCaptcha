@@ -103,5 +103,9 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
   `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin` 的问题。Helmet 现在全局允许跨域资源，
   资源路由按去除查询串后的路径匹配并补充“每次重新验证”头；生产跨域宿主页已实际加载
   `widget.js?v=26.0.7` 并创建 iframe。
+- 2026-11-26：`v26.0.8` 完成同一问题的 iframe 侧修复。`/embed` 现在移除 Helmet
+  默认的 `X-Frame-Options: SAMEORIGIN`，只保留 `frame-ancestors *`，避免旧浏览器
+  在已满足 CSP 的情况下仍拒绝跨域 iframe。生产已确认带查询串的脚本和样式为
+  `cross-origin`，跨域宿主页能够创建并加载 Challenge iframe。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->
