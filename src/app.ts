@@ -87,8 +87,8 @@ const SUPPORTED_API_VERSIONS = [
   API_V2_VERSION,
   API_NEXT_VERSION,
 ] as const;
-const APP_VERSION = "v26.0.7";
-const ASSET_VERSION = "26.0.7";
+const APP_VERSION = "v26.0.8";
+const ASSET_VERSION = "26.0.8";
 
 type ApiVersion = (typeof SUPPORTED_API_VERSIONS)[number];
 
@@ -1303,17 +1303,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         responseApiVersion,
       );
     }
-    if (
-      ["/widget.js", "/widget.css", "/frame.js"].includes(
-        request.url.split("?")[0] ?? "",
-      )
-    ) {
+    const pathname = request.url.split("?")[0] ?? "";
+    if (["/widget.js", "/widget.css", "/frame.js"].includes(pathname)) {
       // These files are unversioned entry points: revalidate on every load so a
       // deployment reaches existing embeds without waiting out a long TTL.
       reply.header("Cache-Control", "no-cache");
       reply.header("Cross-Origin-Resource-Policy", "cross-origin");
       reply.header("Access-Control-Allow-Origin", "*");
       reply.header("Access-Control-Allow-Private-Network", "true");
+    }
+    if (pathname === "/embed") {
+      // The embed page is intentionally framed by third-party origins; the
+      // route's CSP (frame-ancestors *) is authoritative, so drop XFO which
+      // Helmet would otherwise force to SAMEORIGIN.
+      reply.removeHeader("X-Frame-Options");
     }
     if (
       request.url.startsWith("/v1/challenges") ||

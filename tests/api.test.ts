@@ -368,7 +368,7 @@ describe("OxygenChallenge API", () => {
       for (const name of ["widget.js", "widget.css", "frame.js"]) {
         const response = await built.app.inject({
           method: "GET",
-          url: `/${name}?v=26.0.7`,
+          url: `/${name}?v=26.0.8`,
         });
         expect(response.statusCode, name).toBe(200);
         expect(
@@ -377,6 +377,15 @@ describe("OxygenChallenge API", () => {
         ).toBe("cross-origin");
         expect(response.headers["cache-control"], name).toBe("no-cache");
       }
+      const embed = await built.app.inject({
+        method: "GET",
+        url: "/embed?sitekey=site_test&action=submit&parentOrigin=https%3A%2F%2Fapp.test",
+      });
+      expect(embed.statusCode).toBe(200);
+      expect(embed.headers["x-frame-options"]).toBeUndefined();
+      expect(embed.headers["content-security-policy"]).toContain(
+        "frame-ancestors *",
+      );
     } finally {
       await built.app.close();
     }
