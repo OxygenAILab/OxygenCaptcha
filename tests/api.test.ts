@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -352,6 +352,34 @@ describe("OxygenChallenge API", () => {
       (match) => match[0],
     );
     expect(visibleSixDigit).toContain(state?.decoyCode);
+  });
+
+  it("serves versioned widget assets with cross-origin CORP and revalidation", async () => {
+    const publicDir = mkdtempSync(join(tmpdir(), "oxygenchallenge-assets-"));
+    for (const name of ["widget.js", "widget.css", "frame.js"]) {
+      writeFileSync(join(publicDir, name), `/* ${name} */`);
+    }
+    const built = await buildApp({
+      config: testConfig,
+      logger: false,
+      publicDir,
+    });
+    try {
+      for (const name of ["widget.js", "widget.css", "frame.js"]) {
+        const response = await built.app.inject({
+          method: "GET",
+          url: `/${name}?v=26.0.7`,
+        });
+        expect(response.statusCode, name).toBe(200);
+        expect(
+          response.headers["cross-origin-resource-policy"],
+          name,
+        ).toBe("cross-origin");
+        expect(response.headers["cache-control"], name).toBe("no-cache");
+      }
+    } finally {
+      await built.app.close();
+    }
   });
 
   it("allows WebAssembly for the hand model and renders load progress", async () => {

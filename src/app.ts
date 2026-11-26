@@ -87,8 +87,8 @@ const SUPPORTED_API_VERSIONS = [
   API_V2_VERSION,
   API_NEXT_VERSION,
 ] as const;
-const APP_VERSION = "v26.0.6";
-const ASSET_VERSION = "26.0.6";
+const APP_VERSION = "v26.0.7";
+const ASSET_VERSION = "26.0.7";
 
 type ApiVersion = (typeof SUPPORTED_API_VERSIONS)[number];
 
@@ -1246,6 +1246,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
   });
 
   await app.register(helmet, {
+    // The widget bundle and its assets are embedded by other origins; Helmet's
+    // default `same-origin` CORP made browsers refuse to execute widget.js.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
     contentSecurityPolicy: {
       directives: {
         "default-src": ["'none'"],
@@ -1300,7 +1303,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<{
         responseApiVersion,
       );
     }
-    if (["/widget.js", "/widget.css", "/frame.js"].includes(request.url)) {
+    if (
+      ["/widget.js", "/widget.css", "/frame.js"].includes(
+        request.url.split("?")[0] ?? "",
+      )
+    ) {
+      // These files are unversioned entry points: revalidate on every load so a
+      // deployment reaches existing embeds without waiting out a long TTL.
+      reply.header("Cache-Control", "no-cache");
       reply.header("Cross-Origin-Resource-Policy", "cross-origin");
       reply.header("Access-Control-Allow-Origin", "*");
       reply.header("Access-Control-Allow-Private-Network", "true");
