@@ -98,5 +98,10 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
 - 2026-11-25：`v26.0.6` 优化按键同时拖滑块题。双输入从按下或拖动开始时累计重叠时长，
   不再要求到终点后额外保持；先松开按键或先松开鼠标均可完成。服务端仍校验按键、
   距离和最短重叠时长，移动端继续过滤该题型。生产环境已实测两种释放顺序均返回 200。
+- 2026-11-26：`v26.0.7` 修复带版本查询串的 Widget 资源仍返回
+  `Cross-Origin-Resource-Policy: same-origin`、进而触发
+  `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin` 的问题。Helmet 现在全局允许跨域资源，
+  资源路由按去除查询串后的路径匹配并补充“每次重新验证”头；生产跨域宿主页已实际加载
+  `widget.js?v=26.0.7` 并创建 iframe。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->
