@@ -87,8 +87,8 @@ const SUPPORTED_API_VERSIONS = [
   API_V2_VERSION,
   API_NEXT_VERSION,
 ] as const;
-const APP_VERSION = "v26.0.8";
-const ASSET_VERSION = "26.0.8";
+const APP_VERSION = "v26.0.9";
+const ASSET_VERSION = "26.0.9";
 
 type ApiVersion = (typeof SUPPORTED_API_VERSIONS)[number];
 

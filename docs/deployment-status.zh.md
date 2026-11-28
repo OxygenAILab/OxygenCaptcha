@@ -1,6 +1,6 @@
 # 部署状态
 
-当前版本：`v26.0.8`
+当前版本：`v26.0.9`
 
 ## 已完成
 
@@ -107,5 +107,9 @@ Origin CA 证书；当前按 Full 兼容自签名 origin，公网 smoke 已通�
   默认的 `X-Frame-Options: SAMEORIGIN`，只保留 `frame-ancestors *`，避免旧浏览器
   在已满足 CSP 的情况下仍拒绝跨域 iframe。生产已确认带查询串的脚本和样式为
   `cross-origin`，跨域宿主页能够创建并加载 Challenge iframe。
+- 2026-11-28：`v26.0.9` 修复嵌入背景只在验证完成状态融入的问题。Web Component
+  现在对默认 API v2 也上报已解析的 `embed.backgroundColor`，入口与展开挑战统一使用
+  消费端背景；API v4 仍强制要求背景字段。浏览器探针已验证 v2 入口与挑战状态均为
+  `rgb(17, 34, 51)`。
 
 <!-- Git Hub@OxygenAI Lab | OxygenAILab@ StarsailsClover -->

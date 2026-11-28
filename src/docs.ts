@@ -157,7 +157,7 @@ function pageEmbed(origin: string): string {
         <div><code>accessible</code><span><span class="zh">设为 <code>true</code> 时保留兼容替代；入口和题内面板都会收集至少一项、最多四项适配理由。</span><span class="en">Set to <code>true</code> for the compatibility alternative; entry and in-challenge panels collect one to four accessibility reasons.</span></span></div>
         <div><code>media</code><span><span class="zh">无障碍理由中表示当前不便使用麦克风或摄像头；移动端媒体题也可据此换题。</span><span class="en">An accessibility reason for camera or microphone unavailability, including mobile media challenges.</span></span></div>
         <div><code>api-version</code><span><span class="zh">默认 <code>2</code>；设为 <code>4</code> 时需要同时提供背景色，设为 <code>1</code> 回退旧版。</span><span class="en">Defaults to <code>2</code>; set <code>4</code> with a background color, or <code>1</code> for legacy.</span></span></div>
-        <div><code>background-color</code><span><span class="zh">API v4 必填；使用消费端嵌入位置的背景色替换淡蓝背景。</span><span class="en">Required for API v4; replaces the pale-blue challenge background.</span></span></div>
+        <div><code>background-color</code><span><span class="zh">使用消费端嵌入位置的背景色替换淡蓝背景；API v2 可选，v4 必填。</span><span class="en">Replaces the pale-blue challenge background; optional for API v2 and required for v4.</span></span></div>
         <div><code>user-language</code><span><span class="zh">消费端用户选择的界面语言，不是浏览器默认语言。</span><span class="en">Customer-selected interface language, not the browser default.</span></span></div>
         <div><code>name</code><span><span class="zh">隐藏字段名，默认 <code>oxygen-token</code>。</span><span class="en">Hidden input name, defaults to <code>oxygen-token</code>.</span></span></div>
       </div>

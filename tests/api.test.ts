@@ -368,7 +368,7 @@ describe("OxygenChallenge API", () => {
       for (const name of ["widget.js", "widget.css", "frame.js"]) {
         const response = await built.app.inject({
           method: "GET",
-          url: `/${name}?v=26.0.8`,
+          url: `/${name}?v=26.0.9`,
         });
         expect(response.statusCode, name).toBe(200);
         expect(

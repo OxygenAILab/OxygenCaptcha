@@ -289,7 +289,9 @@ class OxygenChallengeElement extends HTMLElement {
               ? { placement: placement as EmbedPlacement }
               : {}),
           }
-        : undefined;
+        : apiVersion === "2"
+          ? { backgroundColor }
+          : undefined;
     const url = new URL("/embed", this.sourceOrigin);
     url.searchParams.set("sitekey", siteKey);
     url.searchParams.set("action", action);

@@ -42,8 +42,8 @@
 | `risk` | 否 | `low` | `low/medium/high/critical`，对应 1/4/6/8 步的最小风险 |
 | `steps` | 否 | 风险默认 | 1 到 8；只能提高，不能低于服务端风险下限 |
 | `accessible` | 否 | `false` | 设为 `true` 进入无障碍流程；配合 `accessibilityNeeds` 组合多步骤题型 |
-| `api-version` | 否 | `2` | `2` 上报时区/语言/屏幕；`4` 还要求 `background-color`；`1` 回退旧版 |
-| `background-color` | v4 是 | - | 消费端嵌入位置背景色，支持 hex 或 rgb，v4 下必填 |
+| `api-version` | 否 | `2` | `2` 上报时区/语言/屏幕并可使用背景色做主题；`4` 强制要求背景色；`1` 回退旧版 |
+| `background-color` | v4 是 | - | 消费端嵌入位置背景色，支持 hex 或 rgb；v2 可选，v4 必填 |
 | `embed-placement` | 否 | `inline` | `inline/modal/sidebar/fullscreen` |
 | `embed-radius` | 否 | `8` | 嵌入卡片圆角，0 到 32 |
 | `embed-width` / `embed-height` | 否 | 自动测量 | 消费端嵌入区域尺寸 |

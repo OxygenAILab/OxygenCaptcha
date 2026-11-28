@@ -1052,7 +1052,7 @@ button{{min-height:44px;margin-top:12px}}
 </style></head>
 <body><form>
 <label for="email">测试表单</label><input id="email" name="email" type="email">
-<oxygen-challenge sitekey="{SITE_KEY}" action="submit" challenge-type="inverse_occlusion"></oxygen-challenge>
+<oxygen-challenge sitekey="{SITE_KEY}" action="submit" challenge-type="inverse_occlusion" background-color="#112233"></oxygen-challenge>
 <button type="submit">提交表单</button>
 </form>
 <script src="{BASE}/widget.js" defer></script>
@@ -1088,6 +1088,9 @@ button{{min-height:44px;margin-top:12px}}
     frame = iframe_handle.content_frame()
     assert frame
     frame.wait_for_selector("#oc-entry-check", state="visible")
+    assert frame.evaluate("getComputedStyle(document.body).backgroundColor") == (
+        "rgb(17, 34, 51)"
+    )
     initial_iframe_height = widget.evaluate(
         "(el) => el.shadowRoot.querySelector('iframe').getBoundingClientRect().height"
     )
@@ -1107,6 +1110,9 @@ button{{min-height:44px;margin-top:12px}}
     )
     frame.locator("#oc-entry-check").click()
     frame.wait_for_selector("#oc-form", state="visible")
+    assert frame.evaluate("getComputedStyle(document.body).backgroundColor") == (
+        "rgb(17, 34, 51)"
+    )
     scrollbar_style = frame.evaluate(
         """() => ({
           scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
