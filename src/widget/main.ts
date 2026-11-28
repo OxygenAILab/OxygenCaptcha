@@ -116,6 +116,32 @@ class OxygenChallengeElement extends HTMLElement {
   private renderedSource = "";
   private readonly sourceOrigin = SOURCE_ORIGIN;
 
+  /**
+   * Vertical bounds the expanded iframe may use: the viewport, tightened by any
+   * ancestor that clips overflow (cards, modals, scroll containers). Without
+   * this the iframe anchors 8px below the viewport top and a clipping card cuts
+   * off the challenge prompt.
+   */
+  private clippingBounds(): { top: number; bottom: number } {
+    let top = 8;
+    let bottom = Number.POSITIVE_INFINITY;
+    let node: HTMLElement | null = this.parentElement;
+    while (node && node !== document.documentElement) {
+      const style = getComputedStyle(node);
+      if (style.overflowY !== "visible") {
+        const rect = node.getBoundingClientRect();
+        if (rect.top >= 0 && rect.top < window.innerHeight) {
+          top = Math.max(top, rect.top + 4);
+        }
+        if (rect.bottom > 0) {
+          bottom = Math.min(bottom, rect.bottom - 4);
+        }
+      }
+      node = node.parentElement;
+    }
+    return { top, bottom };
+  }
+
   connectedCallback(): void {
     this.render();
   }
@@ -192,6 +218,7 @@ class OxygenChallengeElement extends HTMLElement {
       window.clearTimeout(this.successRenderTimer);
       this.successRenderTimer = null;
     }
+    this.style.height = "";
     window.removeEventListener("message", this.onMessage);
     this.setAttribute("data-verified", "true");
     if (this.verifiedToken) {
@@ -330,14 +357,29 @@ class OxygenChallengeElement extends HTMLElement {
     if (data.type === "resize" && typeof data.height === "number") {
       const height = Math.max(96, Math.min(760, Math.ceil(data.height)));
       if (this.frame) {
-        this.frame.style.height = `${height}px`;
         if (data.compact === true || height <= 96) {
+          this.style.height = "";
+          this.frame.style.height = `${height}px`;
           this.frame.style.bottom = "0";
         } else {
           const rect = this.getBoundingClientRect();
-          const availableAbove = Math.max(96, rect.bottom - 8);
+          const bounds = this.clippingBounds();
+          const availableAbove = Math.max(96, rect.bottom - bounds.top);
           const downwardShift = Math.max(0, height - availableAbove);
-          this.frame.style.bottom = downwardShift > 0 ? `${-downwardShift}px` : "0";
+          if (!Number.isFinite(bounds.bottom)) {
+            // No clipping container: keep the compact host height and let the
+            // iframe expand over the surrounding space.
+            this.style.height = "";
+            this.frame.style.height = `${height}px`;
+            this.frame.style.bottom = downwardShift > 0 ? `${-downwardShift}px` : "0";
+          } else {
+            // Inside a clipping container (cards, modals): grow the host in
+            // flow so the card and page grow with it instead of cutting the
+            // prompt or covering the form controls.
+            this.style.height = `${height}px`;
+            this.frame.style.height = `${height}px`;
+            this.frame.style.bottom = "0";
+          }
         }
       }
     } else if (data.type === "step") {
