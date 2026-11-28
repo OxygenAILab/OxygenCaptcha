@@ -199,6 +199,7 @@ function embedStyleForContext(embedContext: EmbedContext | undefined): string {
           : 16;
   return [
     `--oc-embed-bg:${theme.backgroundColor}`,
+    `background-color:${theme.backgroundColor}`,
     `--oc-embed-fg:${theme.foregroundColor}`,
     `--oc-embed-surface:${theme.surfaceColor}`,
     `--oc-embed-text:${theme.textColor}`,

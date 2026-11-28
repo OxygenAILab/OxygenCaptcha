@@ -803,6 +803,7 @@ describe("alpha.8 Turnstile, platform persistence, docs, IP bypass, and legal pa
       expect(embedded.statusCode).toBe(200);
       expect(embedded.body).toContain('data-api-version="4"');
       expect(embedded.body).toContain("--oc-embed-bg:#112233");
+      expect(embedded.body).toContain("background-color:#112233");
       expect(embedded.body).toContain("--oc-embed-radius:8px");
     } finally {
       await built.app.close();
